@@ -7,11 +7,13 @@ so the two channels can be compared on the dashboard.
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from contextlib import ExitStack
+from dataclasses import dataclass, field, replace
 
 import cv2
 import mediapipe as mp
@@ -21,6 +23,9 @@ from mediapipe.tasks.python.core.base_options import BaseOptions
 
 from . import config
 from .posture import Posture, PostureAnalyzer
+from .frames import FrameFeed
+
+logger = logging.getLogger(__name__)
 
 # Metrics shown live and stored per window. Values are 0..1 unless noted.
 METRICS = (
@@ -134,6 +139,10 @@ class FaceTracker(threading.Thread):
         self._eyes_closed = False
         self._jaw_open_since: float | None = None
         self._nose: deque[tuple[float, float, float]] = deque()
+        self._last_seen: float | None = None
+        self._face_box: tuple[float, float, float, float] | None = None
+        self._frame_size = (1, 1)
+        self.frames = FrameFeed()
         self._last_center: tuple[float, float] | None = None
         self._smoothed: dict[str, float] = {}
         self._view: tuple[float, float, float] | None = None
@@ -144,11 +153,11 @@ class FaceTracker(threading.Thread):
         self.posture_learned: dict[str, float] | None = None  # set from stored history
         self._posture = Posture()
         self._frame_i = 0
-        self._pose_frame: tuple[np.ndarray, int] | None = None
         self._pose_ready = threading.Event()
         self.preview_clients = 0  # open /video.mjpg streams; no encoding when nobody watches
         self._last_preview = 0.0
         self._warm_frames = 0
+        self._capture = self._landmarker = self._pose_thread = None
 
     def _portrait(self, frame: np.ndarray, cx: float, cy: float, height: float) -> np.ndarray:
         """Crop a 6:5 window of the given height centered on (cx, cy), clamped to the frame."""
@@ -186,12 +195,50 @@ class FaceTracker(threading.Thread):
         with self.lock:
             return self.crop, self.crop_time
 
+    def sensor_frame(self):
+        """Latest shared 640x360 full RGB frame and matching face metadata."""
+        return self.frames.latest()
+
+    def view(self) -> dict[str, float]:
+        with self.lock:
+            w, h = self._frame_size
+            x, y, vw, vh = self._view_box
+            return {"x": x / w, "y": y / h, "w": vw / w, "h": vh / h}
+
     def get_snapshot(self) -> FaceSnapshot:
         with self.lock:
-            return self.snapshot
+            return FaceSnapshot() if self.paused.is_set() else replace(self.snapshot, posture=self._posture)
 
     # -- loop -------------------------------------------------------------
     def run(self) -> None:
+        try:
+            self._capture_frames()
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"
+            logger.exception("Face tracker failed")
+        finally:
+            self.stopped.set()
+            self._pose_ready.set()
+            self.camera_on = False
+            try:
+                with ExitStack() as cleanup:
+                    if self.posture_analyzer is not None:
+                        cleanup.callback(self.posture_analyzer.close)
+                    if self._pose_thread is not None:
+                        cleanup.callback(self._pose_thread.join)
+                    if self._landmarker is not None:
+                        cleanup.callback(self._landmarker.close)
+                    if self._capture is not None:
+                        cleanup.callback(self._capture.release)
+            except Exception as exc:
+                self.error = f"cleanup: {exc}"
+                logger.exception("Face tracker cleanup failed")
+
+    def stop(self) -> None:
+        self.stopped.set()
+        self._pose_ready.set()
+
+    def _capture_frames(self) -> None:
         options = vision.FaceLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(config.FACE_MODEL), delegate=BaseOptions.Delegate.CPU),
             running_mode=vision.RunningMode.VIDEO,
@@ -199,9 +246,9 @@ class FaceTracker(threading.Thread):
             output_face_blendshapes=True,
             output_facial_transformation_matrixes=True,
         )
-        landmarker = vision.FaceLandmarker.create_from_options(options)
+        landmarker = self._landmarker = vision.FaceLandmarker.create_from_options(options)
         self.posture_analyzer = PostureAnalyzer()
-        pose_thread = threading.Thread(target=self._pose_loop, daemon=True, name="pose")
+        pose_thread = self._pose_thread = threading.Thread(target=self._pose_loop, daemon=True, name="pose")
         pose_thread.start()
         cap = None
         t0 = time.monotonic()
@@ -211,26 +258,30 @@ class FaceTracker(threading.Thread):
             if self.paused.is_set():
                 if cap is not None:
                     cap.release()
-                    cap, self.camera_on = None, False
+                    cap, self._capture, self.camera_on = None, None, False
                     with self.lock:
                         self.snapshot = FaceSnapshot()
                         self.preview_jpeg = None
-                time.sleep(0.2)
+                        self.crop = None
+                        self.frames.clear()
+                        self._last_seen = None
+                self.stopped.wait(0.2)
                 continue
             if cap is None:
-                cap = cv2.VideoCapture(config.CAMERA_INDEX, cv2.CAP_AVFOUNDATION)
+                cap = self._capture = cv2.VideoCapture(config.CAMERA_INDEX, cv2.CAP_AVFOUNDATION)
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
                 if not cap.isOpened():
                     self.error = f"camera {config.CAMERA_INDEX} could not be opened"
+                    logger.error(self.error)
                     cap.release()
-                    cap = None
-                    time.sleep(2)
+                    cap = self._capture = None
+                    self.stopped.wait(2)
                     continue
                 self.camera_on, self.error = True, None
             ok, frame = cap.read()
             if not ok or frame is None:
-                time.sleep(0.05)
+                self.stopped.wait(0.05)
                 continue
             if self._warm_frames < 60:  # the first frames after opening can be black
                 self._warm_frames += 1
@@ -243,32 +294,48 @@ class FaceTracker(threading.Thread):
             last_ts = ts
             result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
             self._frame_i += 1
-            if self._frame_i % 3 == 0:  # hand the pose thread a small frame at ~10 Hz
-                self._pose_frame = (cv2.resize(rgb, (640, 360), interpolation=cv2.INTER_AREA), ts)
-                self._pose_ready.set()
             now = time.time()
             fps_times.append(now)
             self._process(result, rgb, frame, now, len(fps_times) / max(1e-3, fps_times[-1] - fps_times[0]))
-        if cap is not None:
-            cap.release()
-        landmarker.close()
-        pose_thread.join(timeout=2)
-        self.posture_analyzer.close()
-        self.camera_on = False
+            if self.frames.publish(rgb, ts, now, self._face_box if self._last_seen is not None and now - self._last_seen <= 0.5 else None,
+                                   self._last_center, self._last_seen):
+                self._pose_ready.set()
 
     def _pose_loop(self) -> None:
         """Posture changes slowly; scoring it off the camera thread keeps face tracking at full rate."""
+        last_pose = 0.0
+        last_pose_ts = -1
         while not self.stopped.is_set():
             if not self._pose_ready.wait(timeout=0.5):
                 if self.paused.is_set():
                     self._posture = Posture()
+                elif self.posture_analyzer is not None:
+                    self._posture = self.posture_analyzer.miss(time.time())
                 continue
             self._pose_ready.clear()
-            frame, ts = self._pose_frame
+            if self.stopped.is_set():
+                break
+            if self.paused.is_set():
+                self._posture = Posture()
+                continue
+            if self.stopped.wait(max(0, 0.1 - (time.monotonic() - last_pose))):
+                break
+            item = self.frames.latest_pose()
+            if item is None:
+                continue
+            frame, ts, captured, center, seen = item
+            if ts <= last_pose_ts:
+                continue  # no new frame yet; MediaPipe VIDEO mode rejects a repeated timestamp
+            last_pose_ts = ts
+            last_pose = time.monotonic()
             analyzer = self.posture_analyzer
             analyzer.set_reference(self.posture_ref)
             analyzer.learned_fallback = self.posture_learned
-            self._posture = analyzer.update(frame, ts, self._last_center, self._smoothed.get("face_size", 0.0), self.ref_face_size)
+            try:
+                self._posture = analyzer.update(frame, ts, center, self._smoothed.get("face_size", 0.0), self.ref_face_size, seen, now=captured)
+            except Exception as exc:
+                self.error = f"pose: {exc}"
+                logger.exception("Posture tracker failed")
 
     def _pick_face(self, result, w: int, h: int) -> int | None:
         if not result.face_landmarks:
@@ -302,6 +369,8 @@ class FaceTracker(threading.Thread):
             ys = np.array([p.y for p in lms])
             x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
             self._last_center = ((x0 + x1) / 2, (y0 + y1) / 2)
+            self._last_seen = now
+            self._face_box = (float(x0), float(y0), float(x1 - x0), float(y1 - y0))
             shapes = {c.category_name: float(c.score) for c in result.face_blendshapes[idx]}
             matrix = (
                 np.array(result.facial_transformation_matrixes[idx])
@@ -350,7 +419,7 @@ class FaceTracker(threading.Thread):
                 posture=self._posture,
             )
             pz = self._posture
-            if pz.visible:
+            if pz.visible and not pz.stale:
                 raw.update(neck=pz.neck, shoulder_tilt=pz.shoulder_tilt, lean=pz.lean, sink=pz.sink,
                            shoulder_y=self.posture_analyzer._smooth.get("shoulder_y", 0.0),
                            shoulder_width=self.posture_analyzer._smooth.get("shoulder_width", 0.0))
@@ -390,7 +459,13 @@ class FaceTracker(threading.Thread):
             ok, jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 82])
             jpeg_bytes = jpeg.tobytes() if ok else None
             self._last_preview = now
+        # The overlay mapping is available even without an MJPEG subscriber.
+        cx, cy, height = self._view or (w / 2, h / 2, h * 0.9)
+        vh = min(float(h), height, w / 1.2)
+        vw = vh * 1.2
         with self.lock:
+            self._frame_size = (w, h)
+            self._view_box = (min(max(0.0, cx - vw / 2), w - vw), min(max(0.0, cy - vh / 2), h - vh), vw, vh)
             self.snapshot = snap
             if jpeg_bytes is not None:
                 self.preview_jpeg = jpeg_bytes

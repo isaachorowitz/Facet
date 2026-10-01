@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-01",
+  "minutes_present": 84.5,
+  "first_seen": 1790884800,
+  "last_seen": 1790889900,
+  "verdicts": 403,
+  "minutes_talking": 5.4,
+  "notifications": [
+    {
+      "ts": 1790884900,
+      "kind": "posture",
+      "text": "Sit upright."
+    }
+  ],
+  "avg_posture": 86.7,
+  "minutes_poor_posture": 2.1,
+  "minutes_good_posture": 77.4,
+  "expressions": {
+    "focused": 0.75,
+    "neutral": 0.25
+  },
+  "avg_stress": 1.2,
+  "avg_fatigue": 0.7,
+  "avg_focus": 3.1,
+  "avg_energy": 2.8,
+  "avg_positivity": 2.4,
+  "avg_tension": 0.9,
+  "smiling_share": 0.21,
+  "posture": {
+    "upright": 0.92
+  },
+  "activity": {
+    "working": 0.87
+  },
+  "stress_peaks": [
+    {
+      "ts": 1790884900,
+      "stress": 3.2
+    }
+  ],
+  "focus_streaks": [
+    {
+      "start": 1790884800,
+      "minutes": 25.2
+    }
+  ],
+  "breaks": [
+    {
+      "start": 1790886400,
+      "minutes": 5.1
+    }
+  ],
+  "by_hour": [
+    {
+      "hour": 23,
+      "stress": 1.2,
+      "focus": 3.1,
+      "fatigue": 0.7,
+      "positivity": 2.4,
+      "top_expression": "focused"
+    }
+  ],
+  "voice_tones": {
+    "calm": 0.92
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "type": "hello",
+  "latest": {
+    "face": {
+      "ts": 1790884800.25,
+      "expression": {
+        "choice": "focused",
+        "confidence": 0.72,
+        "probabilities": {
+          "focused": 0.72,
+          "neutral": 0.28
+        }
+      },
+      "stress": 1.2,
+      "fatigue": 0.7,
+      "focus": 3.1,
+      "energy": 2.8,
+      "positivity": 2.4,
+      "tension": 0.9,
+      "smiling": 0.3,
+      "frowning": 0.1,
+      "jaw_clenched": 0.2,
+      "eyes_heavy": 0.1,
+      "eyes_on_screen": 0.95,
+      "hand_on_face": 0.05,
+      "talking": 0.2,
+      "yawning": 0.01,
+      "distracted": 0.05,
+      "posture": {
+        "choice": "upright",
+        "confidence": 0.8,
+        "probabilities": {
+          "upright": 0.8,
+          "slumped": 0.2
+        }
+      },
+      "activity": {
+        "choice": "working",
+        "confidence": 0.9,
+        "probabilities": {
+          "working": 0.9
+        }
+      }
+    },
+    "overall": {
+      "ts": 1790884801.25,
+      "mood": {
+        "choice": "focused",
+        "confidence": 0.72,
+        "probabilities": {
+          "focused": 0.72,
+          "neutral": 0.28
+        }
+      },
+      "stress": 1.3,
+      "fatigue": 0.8,
+      "focus": 3.2,
+      "positivity": 2.4,
+      "needs_break": 0.1,
+      "in_flow": 0.8,
+      "overwhelmed": 0.05
+    },
+    "voice": {
+      "ts": 1790884802.0,
+      "tone": {
+        "choice": "calm",
+        "confidence": 0.91,
+        "probabilities": {
+          "calm": 0.91
+        }
+      },
+      "stress": 0.8,
+      "energy": 2.1,
+      "positivity": 2.7,
+      "confident": 0.8,
+      "tired": 0.1,
+      "frustrated": 0.05
+    }
+  },
+  "status": {
+    "paused": false,
+    "camera": "on",
+    "camera_error": null,
+    "judge": "ready",
+    "judge_error": null,
+    "latency_ms": {
+      "face": 825.3,
+      "face_detail": 1900,
+      "voice": 640,
+      "overall": 701
+    },
+    "voice": "listening",
+    "voice_error": null,
+    "mic": "Razer Seiren",
+    "calibrating_seconds_left": 0,
+    "baseline_samples": 85,
+    "baseline": {
+      "smile": {
+        "mean": 0.25,
+        "std": 0.09
+      }
+    },
+    "settings": {
+      "notifications": true,
+      "mic": true,
+      "store_transcripts": false
+    }
+  }
+}

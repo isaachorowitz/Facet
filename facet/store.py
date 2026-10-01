@@ -46,6 +46,10 @@ class Store:
         self.posture_learned: dict[str, float] | None = None
         self.refresh_baseline()
 
+    def close(self) -> None:
+        with self.lock:
+            self.db.close()
+
     def _exec(self, sql: str, args: tuple = ()) -> None:
         with self.lock:
             self.db.execute(sql, args)
@@ -69,7 +73,46 @@ class Store:
         )
 
     def add_event(self, kind: str, data: dict) -> None:
-        self._exec("INSERT INTO events VALUES (?,?,?)", (time.time(), kind, json.dumps(data)))
+        self._exec("INSERT INTO events VALUES (?,?,?)", (data.get("ts", time.time()), kind, json.dumps(data)))
+
+    def events_between(self, kind: str, start: float, end: float) -> list[dict]:
+        rows = self._query("SELECT ts, data FROM events WHERE kind=? AND ts>=? AND ts<? ORDER BY ts, rowid",
+                           (kind, start, end))
+        return [{**json.loads(data), "ts": ts} for ts, data in rows]
+
+    def marks(self, date: str | None = None) -> list[dict]:
+        return self.events_between("mark", *day_bounds(date))
+
+    def recent_captions(self, seconds: float = 3600) -> list[dict]:
+        return self.events_between("caption", time.time() - seconds, time.time() + 1)
+
+    def latest_focus(self) -> dict | None:
+        rows = self._query("SELECT data FROM events WHERE kind='focus' ORDER BY ts DESC, rowid DESC LIMIT 1")
+        return json.loads(rows[0][0]) if rows else None
+
+    def focus_sessions(self, date: str | None = None) -> list[dict]:
+        start, end = day_bounds(date)
+        rows = self._query("SELECT data FROM events WHERE kind='focus' AND json_extract(data, '$.session.started')>=? AND json_extract(data, '$.session.started')<? ORDER BY ts, rowid", (start, end))
+        sessions = {}
+        for (data,) in rows:
+            session = json.loads(data)["session"]
+            sessions[session["started"]] = {"started": session["started"], "minutes": session["minutes"]}
+        return list(sessions.values())
+
+    def cached_recap(self, date: str | None = None) -> dict:
+        start, _ = day_bounds(date)
+        date = datetime.fromtimestamp(start).strftime("%Y-%m-%d")
+        rows = self._query("SELECT data FROM events WHERE kind='recap' AND json_extract(data, '$.date')=? ORDER BY ts DESC, rowid DESC LIMIT 1", (date,))
+        return json.loads(rows[0][0]) if rows else {"date": date, "text": None}
+
+    def recap_evidence(self, date: str | None = None) -> dict:
+        summary = self.summary(date)
+        captions = self.events_between("caption", *day_bounds(date))
+        # Remove repeated observations; sample across the day, retaining the last.
+        unique = list({c["text"]: c for c in captions}.values())
+        notable = unique if len(unique) <= 36 else [unique[int(i)] for i in np.linspace(0, len(unique) - 1, 36)]
+        return {"summary": summary, "marks": summary["marks"], "notable_captions": notable,
+                "nudges": summary["notifications"]}
 
     def get_setting(self, key: str, default):
         rows = self._query("SELECT value FROM settings WHERE key=?", (key,))
@@ -141,12 +184,12 @@ class Store:
             b = buckets.setdefault(int((ts - start) // size), {})
             b.setdefault(key, []).append(value)
 
-        for ts, d in self._query("SELECT ts, data FROM verdicts WHERE kind='face' AND ts BETWEEN ? AND ?", (start, end)):
+        for ts, d in self._query("SELECT ts, data FROM verdicts WHERE kind='face' AND ts>=? AND ts<?", (start, end)):
             v = json.loads(d)
             for k in ("stress", "fatigue", "focus", "energy", "positivity", "tension"):
                 put(ts, k, v[k])
             put(ts, "expression", v["expression"]["choice"])
-        for ts, d in self._query("SELECT ts, data FROM face_windows WHERE ts BETWEEN ? AND ? AND neutral=0", (start, end)):
+        for ts, d in self._query("SELECT ts, data FROM face_windows WHERE ts>=? AND ts<? AND neutral=0", (start, end)):
             v = json.loads(d)
             put(ts, "present", v.get("present", 0))
             if "posture_score" in v:
@@ -155,14 +198,18 @@ class Store:
                 put(ts, "measured_tension", v["tension"])
                 put(ts, "smile", v["smile"])
                 put(ts, "blink_rate", v.get("blink_rate", 0))
-        for ts, d in self._query("SELECT ts, prosody FROM speech WHERE ts BETWEEN ? AND ?", (start, end)):
+        for ts, d in self._query("SELECT ts, prosody FROM speech WHERE ts>=? AND ts<?", (start, end)):
             put(ts, "speech_s", json.loads(d)["duration_s"])
+        for mark in self.marks(date):
+            put(mark["ts"], "marks", mark["kind"])
         points = []
         for i in sorted(buckets):
             b = buckets[i]
             p: dict = {"t": start + i * size}
             for k, vals in b.items():
-                if k == "expression":
+                if k == "marks":
+                    p[k] = vals
+                elif k == "expression":
                     p[k] = Counter(vals).most_common(1)[0][0]
                 elif k == "speech_s":
                     p[k] = round(sum(vals), 1)
@@ -173,10 +220,10 @@ class Store:
 
     def summary(self, date: str | None) -> dict:
         start, end = day_bounds(date)
-        face = [(ts, json.loads(d)) for ts, d in self._query("SELECT ts, data FROM verdicts WHERE kind='face' AND ts BETWEEN ? AND ? ORDER BY ts", (start, end))]
-        windows = [(ts, json.loads(d)) for ts, d in self._query("SELECT ts, data FROM face_windows WHERE ts BETWEEN ? AND ? AND neutral=0 ORDER BY ts", (start, end))]
-        speech = self._query("SELECT ts, prosody, verdict FROM speech WHERE ts BETWEEN ? AND ?", (start, end))
-        events = self._query("SELECT ts, kind, data FROM events WHERE ts BETWEEN ? AND ? ORDER BY ts", (start, end))
+        face = [(ts, json.loads(d)) for ts, d in self._query("SELECT ts, data FROM verdicts WHERE kind='face' AND ts>=? AND ts<? ORDER BY ts", (start, end))]
+        windows = [(ts, json.loads(d)) for ts, d in self._query("SELECT ts, data FROM face_windows WHERE ts>=? AND ts<? AND neutral=0 ORDER BY ts", (start, end))]
+        speech = self._query("SELECT ts, prosody, verdict FROM speech WHERE ts>=? AND ts<?", (start, end))
+        events = self._query("SELECT ts, kind, data FROM events WHERE ts>=? AND ts<? ORDER BY ts", (start, end))
         present_ts = [ts for ts, w in windows if w.get("present", 0) > 0.5]
         out: dict = {
             "date": datetime.fromtimestamp(start).strftime("%Y-%m-%d"),
@@ -187,6 +234,11 @@ class Store:
             "minutes_talking": round(sum(json.loads(p)["duration_s"] for _, p, _ in speech) / 60, 1),
             "notifications": [{"ts": ts, **json.loads(d)} for ts, k, d in events if k == "notification"],
         }
+        out.update(marks=self.marks(date), sips=sum(k == "sip" for _, k, _ in events),
+                   face_touches=sum(k == "face_touch" for _, k, _ in events),
+                   eyes_breaks_taken=sum(k == "eyes_break_taken" for _, k, _ in events),
+                   eyes_breaks_due=sum(k == "eyes_break_due" for _, k, _ in events))
+        out["focus_sessions"] = self.focus_sessions(date)
         scores = [w["posture_score"] for _, w in windows if "posture_score" in w]
         if scores:
             out["avg_posture"] = round(float(np.mean(scores)), 1)

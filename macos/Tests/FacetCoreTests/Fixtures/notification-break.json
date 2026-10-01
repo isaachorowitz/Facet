@@ -1,0 +1,7 @@
+{
+  "type": "notification",
+  "data": {
+    "kind": "break",
+    "text": "Time to step away from your desk."
+  }
+}

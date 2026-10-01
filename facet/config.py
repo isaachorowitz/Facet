@@ -10,7 +10,9 @@ DATA_DIR = Path(os.environ.get("FACET_DATA", Path.home() / "Library/Application 
 DB_PATH = DATA_DIR / "facet.db"
 FACE_MODEL = ROOT / "models" / "face_landmarker.task"
 POSE_MODEL = ROOT / "models" / "pose_landmarker_lite.task"
+HAND_MODEL = ROOT / "models" / "gesture_recognizer.task"
 MEDIAPIPE_MODELS = {
+    HAND_MODEL: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task",
     FACE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
     POSE_MODEL: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
 }
@@ -48,3 +50,6 @@ VOICE_EMOTION_REPO = "superb/hubert-large-superb-er"
 
 FACE_WINDOW_SECONDS = 5.0  # one stored face-metric row per window
 BREAK_GAP_SECONDS = 180  # absence longer than this counts as a break
+
+NARRATOR_REPO = os.environ.get("FACET_NARRATOR", "mlx-community/Qwen3.5-9B-MLX-4bit")
+CAPTION_INTERVAL = 12.0

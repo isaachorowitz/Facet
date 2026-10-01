@@ -1,0 +1,22 @@
+{
+  "start": 1790812800,
+  "bucket_minutes": 5,
+  "points": [
+    {
+      "t": 1790884800,
+      "stress": 1.2,
+      "fatigue": 0.7,
+      "focus": 3.1,
+      "energy": 2.8,
+      "positivity": 2.4,
+      "tension": 0.9,
+      "expression": "focused",
+      "present": 0.94,
+      "measured_tension": 0.19,
+      "smile": 0.24,
+      "blink_rate": 15.2,
+      "posture": 3.47,
+      "speech_s": 22.1
+    }
+  ]
+}

@@ -13,13 +13,16 @@ import queue
 import sys
 import threading
 import time
-import traceback
+import logging
+import os
 from typing import Any, Callable
 
 import numpy as np
 from PIL import Image
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 EXPRESSIONS = {
     "happy": "Clearly happy or pleased",
@@ -147,10 +150,20 @@ OVERALL_QUESTIONS: dict[str, Any] = {
 }
 
 
-def _worker_main(requests, responses, repo: str, backend: str, device: str) -> None:
+def _watch_parent(parent_pid: int) -> None:
+    """Exit even during model loading/inference if the owning server disappears."""
+    while os.getppid() == parent_pid:
+        time.sleep(0.5)
+    os._exit(0)
+
+
+def _worker_main(requests, responses, repo: str, backend: str, device: str, parent_pid: int) -> None:
     """Runs in its own process: owns the model, answers SystemOne requests forever."""
     import warnings
 
+    from . import configure_logging
+    configure_logging()
+    threading.Thread(target=_watch_parent, args=(parent_pid,), daemon=True, name="parent-watchdog").start()
     warnings.filterwarnings("ignore")
     from huggingface_hub import snapshot_download
 
@@ -171,6 +184,7 @@ def _worker_main(requests, responses, repo: str, backend: str, device: str) -> N
             answer = ClefMLX(path, device=device).systemone
         responses.put(("ready", None))
     except Exception as exc:  # reported to the parent, which surfaces it
+        logger.exception("Clef worker failed")
         responses.put(("error", f"{type(exc).__name__}: {exc}"))
         return
     while True:
@@ -180,6 +194,7 @@ def _worker_main(requests, responses, repo: str, backend: str, device: str) -> N
         try:
             responses.put(("ok", answer(job)))
         except Exception as exc:
+            logger.exception("Clef inference failed")
             responses.put(("error", f"{type(exc).__name__}: {exc}"))
 
 
@@ -193,31 +208,58 @@ class ClefWorker:
         self.requests, self.responses = ctx.Queue(), ctx.Queue()
         self.process = ctx.Process(
             target=_worker_main,
-            args=(self.requests, self.responses, config.CLEF_REPO, config.CLEF_BACKEND, config.CLEF_DEVICE),
+            args=(self.requests, self.responses, config.CLEF_REPO, config.CLEF_BACKEND, config.CLEF_DEVICE, os.getpid()),
             daemon=True,
             name="facet-clef",
         )
+        self.closed = threading.Event()
+        self._close_lock = threading.Lock()
+        self._ready = False
         self.process.start()
-        kind, payload = self.responses.get()
-        if kind != "ready":
-            raise RuntimeError(payload)
 
-    def __call__(self, request: dict) -> dict:
-        self.requests.put(request)
-        while True:
+    def _receive(self) -> tuple[str, Any]:
+        while not self.closed.is_set():
             try:
-                kind, payload = self.responses.get(timeout=1.0)
-                break
+                return self.responses.get(timeout=0.2)
             except queue.Empty:
                 if not self.process.is_alive():
                     raise RuntimeError("Clef worker process exited")
+        raise RuntimeError("Clef worker closed")
+
+    def wait_ready(self) -> None:
+        if not self._ready:
+            kind, payload = self._receive()
+            if kind != "ready":
+                raise RuntimeError(payload)
+            self._ready = True
+
+    def __call__(self, request: dict) -> dict:
+        self.wait_ready()
+        if self.closed.is_set():
+            raise RuntimeError("Clef worker closed")
+        self.requests.put(request)
+        kind, payload = self._receive()
         if kind != "ok":
             raise RuntimeError(payload)
         return payload
 
     def close(self) -> None:
-        self.requests.put(None)
-        self.process.join(timeout=5)
+        with self._close_lock:
+            if self.closed.is_set():
+                return
+            self.closed.set()
+            self.requests.put(None)
+            self.process.join(timeout=5)
+            if self.process.is_alive():
+                self.process.terminate()
+                self.process.join(timeout=2)
+            if self.process.is_alive():
+                self.process.kill()
+                self.process.join()
+            # Do not wait for a queued image to flush to a child we just stopped.
+            for channel in (self.requests, self.responses):
+                channel.cancel_join_thread()
+                channel.close()
 
 
 def _load_clef():
@@ -250,6 +292,8 @@ class Judge(threading.Thread):
         self.paused = threading.Event()
         self.stopped = threading.Event()
         self._last_face_crop_time = 0.0
+        self.systemone: ClefWorker | None = None
+        self._worker_lock = threading.Lock()
 
     def submit_voice(self, state: dict, callback: Callable[[dict], None]) -> None:
         """Queue a voice judgment; voice jobs run before the next face judgment."""
@@ -264,9 +308,27 @@ class Judge(threading.Thread):
         self.latency[kind] = round((time.time() - t) * 1000)
         return simplify(response["answers"])
 
+    def stop(self) -> None:
+        self.stopped.set()
+        with self._worker_lock:
+            worker = self.systemone
+        if worker is not None:
+            worker.close()
+
     def run(self) -> None:
         try:
-            self.systemone = _load_clef()
+            self._judge_loop()
+        finally:
+            if self.systemone is not None:
+                self.systemone.close()
+
+    def _judge_loop(self) -> None:
+        try:
+            with self._worker_lock:
+                if self.stopped.is_set():
+                    return
+                self.systemone = _load_clef()
+            self.systemone.wait_ready()
             self.status = "warming up"
             warm = np.full((config.CROP_SIZE, config.CROP_SIZE, 3), 128, dtype=np.uint8)
             self._run("face", {"context": "warmup"}, FACE_CORE, warm)
@@ -275,8 +337,10 @@ class Judge(threading.Thread):
             self._run("overall", {"warmup": True}, OVERALL_QUESTIONS)
             self.status = "ready"
         except Exception as exc:  # surfaced on the dashboard
+            if self.stopped.is_set():
+                return
             self.status, self.error = "failed", f"{type(exc).__name__}: {exc}"
-            traceback.print_exc()
+            logger.exception("Judge failed")
             return
 
         next_face = time.time()
@@ -292,10 +356,10 @@ class Judge(threading.Thread):
                 pass
             except Exception as exc:
                 self.error = f"voice: {exc}"
-                traceback.print_exc()
+                logger.exception("Judge failed")
             now = time.time()
             if self.paused.is_set():
-                time.sleep(0.2)
+                self.stopped.wait(0.2)
                 continue
             try:
                 if now >= next_face:
@@ -317,5 +381,5 @@ class Judge(threading.Thread):
                 self.error = None
             except Exception as exc:
                 self.error = f"{type(exc).__name__}: {exc}"
-                traceback.print_exc()
-                time.sleep(1)
+                logger.exception("Judge failed")
+                self.stopped.wait(1)

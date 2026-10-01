@@ -1,0 +1,7 @@
+{
+  "type": "notification",
+  "data": {
+    "kind": "stress",
+    "text": "Your stress has been elevated. Take a moment to breathe."
+  }
+}

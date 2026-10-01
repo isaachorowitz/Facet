@@ -1,0 +1,81 @@
+{
+  "type": "live",
+  "face": {
+    "present": true,
+    "metrics": {
+      "smile": 0.24,
+      "jaw_open": 0.1,
+      "yaw": 4.1
+    },
+    "vs_usual": {
+      "smile": -0.11
+    },
+    "blink_rate": 15.2,
+    "looking_at_screen": true,
+    "yawning": false,
+    "fps": 29.8
+  },
+  "voice": {
+    "level_db": -32.5,
+    "speaking": false
+  },
+  "status": {
+    "paused": false,
+    "camera": "on",
+    "camera_error": null,
+    "judge": "ready",
+    "judge_error": null,
+    "latency_ms": {
+      "face": 825.3,
+      "face_detail": 1900,
+      "voice": 640,
+      "overall": 701
+    },
+    "voice": "listening",
+    "voice_error": null,
+    "mic": "Razer Seiren",
+    "calibrating_seconds_left": 0,
+    "baseline_samples": 85,
+    "baseline": {
+      "smile": {
+        "mean": 0.25,
+        "std": 0.09
+      }
+    },
+    "settings": {
+      "notifications": true,
+      "mic": true,
+      "store_transcripts": false
+    }
+  },
+  "minutes_since_break": 24.7,
+  "posture": {
+    "visible": true,
+    "score": 86.7,
+    "state": "good",
+    "issues": [],
+    "neck": 0.41,
+    "shoulder_tilt": 0.01,
+    "lean": 0.02,
+    "sink": 0.04,
+    "reference": "calibrated",
+    "ref_neck": 0.42,
+    "skeleton": {
+      "nose": [
+        0.9,
+        0.2,
+        0.99
+      ],
+      "l_sh": [
+        0.6,
+        0.5,
+        0.97
+      ],
+      "r_sh": [
+        1.1,
+        0.51,
+        0.98
+      ]
+    }
+  }
+}

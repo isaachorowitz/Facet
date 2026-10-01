@@ -6,10 +6,10 @@ your voice from someone else's in the room; every segment is attributed to you.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
-import traceback
 from collections import deque
 from typing import Callable
 
@@ -17,6 +17,8 @@ import numpy as np
 import sounddevice as sd
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 SR = 16000
 FRAME = 480  # 30 ms
@@ -26,6 +28,12 @@ MAX_SECONDS = 15.0
 MIN_SECONDS = 0.7
 SPEECH_DB = -42.0  # quieter than this is room noise, not someone talking at the desk
 FILLER = {"mm", "hmm", "mhm", "mm-hmm", "uh-huh", "mm-mm", "hm", "ooh", "oh", "uh", "um", "ah", "huh", "yeah", "okay", "ok"}
+
+
+def is_filler(text: str) -> bool:
+    """Ignore empty transcripts and up to two standalone filler words."""
+    bare = [w.strip(".,!?\"'").lower() for w in text.split()]
+    return not bare or (len(bare) <= 2 and all(w in FILLER for w in bare))
 
 
 def pick_input_device() -> int | None:
@@ -91,73 +99,99 @@ class VoiceListener(threading.Thread):
         self.speaking = False
         self.speech_seconds_today = 0.0
         self._segments: queue.Queue[np.ndarray] = queue.Queue()
+        self.analysis_thread: threading.Thread | None = None
 
     def _callback(self, indata, frames, t, status) -> None:
         self.blocks.put(indata[:, 0].copy())
 
     def run(self) -> None:
-        worker = threading.Thread(target=self._analyze_loop, daemon=True, name="voice-analyze")
-        worker.start()
+        self.analysis_thread = threading.Thread(target=self._analyze_loop, daemon=True, name="voice-analyze")
+        self.analysis_thread.start()
         stream = None
         noise: deque[float] = deque(maxlen=330)  # ~10 s of frame energies
         buf = np.zeros(0, dtype=np.float32)
         segment: list[np.ndarray] = []
         speech_run = silence_run = 0
         in_speech = False
-        while not self.stopped.is_set():
-            if self.paused.is_set():
-                if stream is not None:
-                    stream.stop()
-                    stream.close()
-                    stream = None
-                    self.speaking = False
-                time.sleep(0.2)
-                continue
-            if stream is None:
-                try:
-                    device = pick_input_device()
-                    self.device_name = sd.query_devices(device if device is not None else sd.default.device[0])["name"]
-                    stream = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=FRAME, device=device, callback=self._callback)
-                    stream.start()
-                    if self.status == "loading":
-                        self.status = "listening (loading transcriber)"
-                except Exception as exc:
-                    self.error = f"mic: {exc}"
-                    time.sleep(3)
+        try:
+            while not self.stopped.is_set():
+                if self.paused.is_set():
+                    if stream is not None:
+                        stream.stop()
+                        stream.close()
+                        stream = None
+                        self.speaking = False
+                    self.stopped.wait(0.2)
                     continue
+                if stream is None:
+                    try:
+                        device = pick_input_device()
+                        self.device_name = sd.query_devices(device if device is not None else sd.default.device[0])["name"]
+                        stream = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=FRAME, device=device, callback=self._callback)
+                        stream.start()
+                        if self.status == "loading":
+                            self.status = "listening (loading transcriber)"
+                    except Exception as exc:
+                        self.error = f"mic: {exc}"
+                        logger.exception("Could not open microphone")
+                        self.stopped.wait(3)
+                        continue
+                try:
+                    block = self.blocks.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                buf = np.concatenate([buf, block])
+                while len(buf) >= FRAME:
+                    frame, buf = buf[:FRAME], buf[FRAME:]
+                    db = float(20 * np.log10(np.sqrt(np.mean(frame**2)) + 1e-9))
+                    self.level_db = db
+                    floor = float(np.percentile(noise, 20)) if len(noise) > 30 else -60.0
+                    loud = db > max(floor + 12.0, SPEECH_DB)
+                    if not loud or not in_speech:
+                        noise.append(db)
+                    if in_speech:
+                        segment.append(frame)
+                        silence_run = 0 if loud else silence_run + 1
+                        length = len(segment) * FRAME / SR
+                        if silence_run >= END_FRAMES or length >= MAX_SECONDS:
+                            audio = np.concatenate(segment)
+                            if length >= MIN_SECONDS:
+                                self._segments.put(audio)
+                            segment, in_speech, silence_run = [], False, 0
+                    else:
+                        speech_run = speech_run + 1 if loud else 0
+                        segment = (segment + [frame])[-START_FRAMES - 3 :]
+                        if speech_run >= START_FRAMES:
+                            in_speech, speech_run = True, 0
+                    self.speaking = in_speech
+        except Exception as exc:
+            self.error = f"mic: {exc}"
+            logger.exception("Microphone listener failed")
+        finally:
+            self.stopped.set()
             try:
-                block = self.blocks.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            buf = np.concatenate([buf, block])
-            while len(buf) >= FRAME:
-                frame, buf = buf[:FRAME], buf[FRAME:]
-                db = float(20 * np.log10(np.sqrt(np.mean(frame**2)) + 1e-9))
-                self.level_db = db
-                floor = float(np.percentile(noise, 20)) if len(noise) > 30 else -60.0
-                loud = db > max(floor + 12.0, SPEECH_DB)
-                if not loud or not in_speech:
-                    noise.append(db)
-                if in_speech:
-                    segment.append(frame)
-                    silence_run = 0 if loud else silence_run + 1
-                    length = len(segment) * FRAME / SR
-                    if silence_run >= END_FRAMES or length >= MAX_SECONDS:
-                        audio = np.concatenate(segment)
-                        if length >= MIN_SECONDS:
-                            self._segments.put(audio)
-                        segment, in_speech, silence_run = [], False, 0
-                else:
-                    speech_run = speech_run + 1 if loud else 0
-                    segment = (segment + [frame])[-START_FRAMES - 3 :]
-                    if speech_run >= START_FRAMES:
-                        in_speech, speech_run = True, 0
-                self.speaking = in_speech
-        if stream is not None:
-            stream.stop()
-            stream.close()
+                if stream is not None:
+                    try:
+                        stream.stop()
+                    finally:
+                        stream.close()
+            except Exception as exc:
+                self.error = f"mic cleanup: {exc}"
+                logger.exception("Microphone cleanup failed")
+            finally:
+                self.speaking = False
+
+    def stop(self) -> None:
+        self.stopped.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        super().join(timeout)
+        if self.analysis_thread is not None:
+            self.analysis_thread.join(timeout)
 
     def _analyze_loop(self) -> None:
+        if self.stopped.is_set():
+            return
         try:
             import mlx.core as mx
             from parakeet_mlx import from_pretrained
@@ -166,13 +200,16 @@ class VoiceListener(threading.Thread):
             asr = from_pretrained(config.PARAKEET_REPO)
         except Exception as exc:
             self.status, self.error = "transcriber failed", str(exc)
-            traceback.print_exc()
+            logger.exception("Voice analysis failed")
+            return
+        if self.stopped.is_set():
             return
         emotion = None
         try:
             emotion = EmotionModel()
         except Exception as exc:  # optional; transcript and prosody still work
             self.error = f"voice emotion model unavailable: {exc}"
+            logger.exception("Voice emotion model unavailable")
         self.status = "listening"
         labels = {"neu": "neutral", "hap": "happy", "ang": "angry", "sad": "sad"}
         while not self.stopped.is_set():
@@ -185,8 +222,7 @@ class VoiceListener(threading.Thread):
                 norm = audio / peak * 0.9 if peak > 0 else audio
                 result = asr.generate(get_logmel(mx.array(norm), asr.preprocessor_config))[0]
                 text = result.text.strip()
-                bare = [w.strip(".,!?\"'").lower() for w in text.split()]
-                if not bare or (len(bare) <= 2 and all(w in FILLER for w in bare)):
+                if is_filler(text):
                     continue  # noise or a lone filler sound, not worth judging
                 words = len(text.split())
                 seg = {"ts": time.time(), "text": text, "prosody": prosody(audio, words), "emotion": {}}
@@ -196,4 +232,4 @@ class VoiceListener(threading.Thread):
                 self.on_segment(seg)
             except Exception as exc:
                 self.error = f"analyze: {exc}"
-                traceback.print_exc()
+                logger.exception("Voice analysis failed")

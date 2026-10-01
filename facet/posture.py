@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import mediapipe as mp
 import numpy as np
@@ -33,6 +33,7 @@ MODEL = config.POSE_MODEL
 
 @dataclass
 class Posture:
+    stale: bool = False
     visible: bool = False
     score: float = 0.0  # 0..100, 100 = your reference posture
     state: str = "unknown"  # good | fair | poor | unknown
@@ -46,12 +47,36 @@ class Posture:
     ref_neck: float = 0.0  # reference head height above shoulders, for the ghost figure
 
 
+def score_posture(s: dict[str, float], ref: dict[str, float] | None, lean: float) -> tuple[float, str, list[str]]:
+    """Score smoothed measurements against an upright reference without side effects."""
+    issues: list[str] = []
+    if ref is None:
+        score, state = 0.0, "unknown"
+    else:
+        neck_drop = max(0.0, (ref["neck"] - s["neck"]) / max(1e-3, ref["neck"]))
+        sink = max(0.0, (s["shoulder_y"] - ref["shoulder_y"]) / max(1e-3, ref["shoulder_width"]))
+        tilt = max(0.0, abs(s["shoulder_tilt"]) - 4.0)
+        lean_pen = max(0.0, lean - 1.12)
+        penalty = min(1.0, neck_drop / 0.22 * 0.5 + sink / 0.3 * 0.2 + tilt / 10 * 0.15 + lean_pen / 0.3 * 0.15)
+        score = round(100 * (1 - penalty), 1)
+        state = "good" if score >= 75 else "fair" if score >= 55 else "poor"
+        if neck_drop > 0.12:
+            issues.append("Head dropping forward")
+        if sink > 0.15:
+            issues.append("Sinking into the chair")
+        if tilt > 3:
+            issues.append(f"{'Left' if s['shoulder_tilt'] > 0 else 'Right'} shoulder low")
+        if lean_pen > 0.08:
+            issues.append("Leaning into the screen")
+    return score, state, issues
+
+
 class PostureAnalyzer:
     def __init__(self) -> None:
         options = vision.PoseLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(MODEL), delegate=BaseOptions.Delegate.CPU),
             running_mode=vision.RunningMode.VIDEO,
-            num_poses=1,  # half the cost of two; the face check below rejects anyone else
+            num_poses=2,  # prefer the tracked face, or the central/largest body during face misses
         )
         self.landmarker = vision.PoseLandmarker.create_from_options(options)
         self.calibrated: dict[str, float] | None = None
@@ -59,6 +84,8 @@ class PostureAnalyzer:
         self._history: deque[tuple[float, float, float, float]] = deque()  # ts, neck, shoulder_y, sw
         self._smooth: dict[str, float] = {}
         self.latest = Posture()
+        self._last_good: float | None = None
+        self._score_ema: float | None = None
 
     def close(self) -> None:
         self.landmarker.close()
@@ -78,30 +105,42 @@ class PostureAnalyzer:
         best = arr[arr[:, 0] >= np.percentile(arr[:, 0], 70)]
         return {"neck": float(np.median(best[:, 0])), "shoulder_y": float(np.median(best[:, 1])), "shoulder_width": float(np.median(best[:, 2]))}, "learned"
 
-    def update(self, rgb_small: np.ndarray, ts_ms: int, face_center: tuple[float, float] | None, face_size: float, ref_face_size: float | None) -> Posture:
+    def miss(self, now: float) -> Posture:
+        if self._last_good is not None and now - self._last_good <= 3.0:
+            self.latest = replace(self.latest, stale=True)
+        else:
+            self.latest = Posture()
+            self._smooth.clear()
+            self._score_ema = None
+        return self.latest
+
+    def update(self, rgb_small: np.ndarray, ts_ms: int, face_center: tuple[float, float] | None, face_size: float, ref_face_size: float | None, face_seen_at: float | None = None, *, now: float | None = None) -> Posture:
         h, w = rgb_small.shape[:2]
         aspect = w / h
         result = self.landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_small), ts_ms)
+        now = time.time() if now is None else now
         if not result.pose_landmarks:
-            self.latest = Posture()
-            return self.latest
-        # The pose whose nose is nearest the tracked face is you.
-        idx = 0
-        if face_center is not None and len(result.pose_landmarks) > 1:
-            idx = int(np.argmin([math.hypot(p[NOSE].x - face_center[0], p[NOSE].y - face_center[1]) for p in result.pose_landmarks]))
-        lm = result.pose_landmarks[idx]
-        if face_center is not None and math.hypot(lm[NOSE].x - face_center[0], lm[NOSE].y - face_center[1]) > 0.12:
-            self.latest = Posture()  # that body is not the face we are tracking
-            return self.latest
-        if min(lm[L_SH].visibility, lm[R_SH].visibility) < 0.5:
-            self.latest = Posture(skeleton=self._skeleton(lm, aspect))
-            return self.latest
+            return self.miss(now)
+        fresh = face_center is not None and face_seen_at is not None and 0 <= now - face_seen_at <= 0.5
+        poses = [p for p in result.pose_landmarks if min(p[L_SH].visibility, p[R_SH].visibility) >= 0.5]
+        if not poses:
+            return self.miss(now)
+        if fresh:
+            lm = min(poses, key=lambda p: math.hypot(p[NOSE].x - face_center[0], p[NOSE].y - face_center[1]))
+            if math.hypot(lm[NOSE].x - face_center[0], lm[NOSE].y - face_center[1]) > 0.12:
+                return self.miss(now)
+        else:
+            # Shoulder width rewards the larger body; distance rewards centrality.
+            lm = max(poses, key=lambda p: math.hypot((p[L_SH].x - p[R_SH].x) * aspect, p[L_SH].y - p[R_SH].y)
+                     / (1 + 2 * abs((p[L_SH].x + p[R_SH].x) / 2 - 0.5)))
 
         P = lambda i: np.array([lm[i].x * aspect, lm[i].y])  # noqa: E731  aspect-correct
         ls, rs = P(L_SH), P(R_SH)
         mid = (ls + rs) / 2
         sw = float(np.linalg.norm(ls - rs))
         head = (P(NOSE) + P(L_EAR) + P(R_EAR)) / 3
+        if sw < 1e-3:
+            return self.miss(now)
         raw = {
             "neck": float((mid[1] - head[1]) / sw),
             # The image is not mirrored here: the person's left shoulder is image-right.
@@ -112,31 +151,18 @@ class PostureAnalyzer:
         for k, v in raw.items():
             self._smooth[k] = self._smooth.get(k, v) * 0.7 + v * 0.3
         s = self._smooth
-        now = time.time()
         if not self._history or now - self._history[-1][0] >= 0.5:
             self._history.append((now, s["neck"], s["shoulder_y"], s["shoulder_width"]))
         ref, ref_kind = self._reference(now)
 
-        issues: list[str] = []
         lean = face_size / ref_face_size if ref_face_size else 1.0
-        if ref is None:
-            score, state, sink = 0.0, "unknown", 0.0
-        else:
-            neck_drop = max(0.0, (ref["neck"] - s["neck"]) / max(1e-3, ref["neck"]))
-            sink = max(0.0, (s["shoulder_y"] - ref["shoulder_y"]) / max(1e-3, ref["shoulder_width"]))
-            tilt = max(0.0, abs(s["shoulder_tilt"]) - 4.0)
-            lean_pen = max(0.0, lean - 1.12)
-            penalty = min(1.0, neck_drop / 0.22 * 0.5 + sink / 0.3 * 0.2 + tilt / 10 * 0.15 + lean_pen / 0.3 * 0.15)
-            score = round(100 * (1 - penalty), 1)
+        score, state, issues = score_posture(s, ref, lean)
+        if ref is not None:
+            self._score_ema = score if self._score_ema is None else self._score_ema * 0.7 + score * 0.3
+            score = round(self._score_ema, 1)
             state = "good" if score >= 75 else "fair" if score >= 55 else "poor"
-            if neck_drop > 0.12:
-                issues.append("Head dropping forward")
-            if sink > 0.15:
-                issues.append("Sinking into the chair")
-            if tilt > 3:
-                issues.append(f"{'Left' if s['shoulder_tilt'] > 0 else 'Right'} shoulder low")
-            if lean_pen > 0.08:
-                issues.append("Leaning into the screen")
+        self._last_good = now
+        sink = max(0.0, (s["shoulder_y"] - ref["shoulder_y"]) / max(1e-3, ref["shoulder_width"])) if ref else 0.0
         self.latest = Posture(
             visible=True, score=score, state=state, issues=issues,
             neck=round(s["neck"], 3), shoulder_tilt=round(s["shoulder_tilt"], 1), lean=round(lean, 3), sink=round(sink, 3),

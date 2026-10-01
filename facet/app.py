@@ -4,33 +4,38 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import subprocess
 import threading
 import time
 import webbrowser
 from collections import deque
+from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI
 
-from . import config
+from . import config, configure_logging
+from .api import register_routes
 from .face import FaceTracker
+from .features import Features
 from .judge import Judge
 from .store import Store
 from .voice import VoiceListener
 
-STATIC = Path(__file__).parent / "static"
+logger = logging.getLogger(__name__)
 
 
-class Hub:
+class Hub(Features):
     """Shared state between the worker threads and the web clients."""
 
     def __init__(self) -> None:
-        config.ensure_models()
+        self.headless = os.environ.get("FACET_HEADLESS") == "1"
+        if not self.headless:
+            config.ensure_models()
         self.store = Store()
         self.settings = {
             "notifications": self.store.get_setting("notifications", True),
@@ -45,11 +50,15 @@ class Hub:
         self.started = time.time()
         self.last_notified: dict[str, float] = {}
         self.paused = False
+        self.stopped = threading.Event()
+        self.background_threads: list[threading.Thread] = []
+        self.app_clients = 0
 
         self.face = FaceTracker()
         self.judge = Judge(self.face.latest_crop, self.on_verdict)
         self.judge.overall_state = self.overall_state
         self.voice = VoiceListener(self.on_speech)
+        self.init_features()
         if not self.settings["mic"]:
             self.voice.paused.set()
 
@@ -60,6 +69,10 @@ class Hub:
         self.face.ref_face_size = fs["mean"] if fs else None
 
     def start(self) -> None:
+        self.apply_baseline()
+        if self.headless:
+            logger.info("Headless mode: hardware and model workers disabled")
+            return
         # transformers resolves names lazily and that is not thread safe; resolve
         # everything the workers need here, before any of them start.
         from transformers import (  # noqa: F401
@@ -69,15 +82,32 @@ class Hub:
             Qwen3_5ForConditionalGeneration,
         )
 
-        self.apply_baseline()
         self.face.start()
         self.judge.start()
         self.voice.start()
-        threading.Thread(target=self._window_loop, daemon=True, name="windows").start()
+        self.start_features()
+        self.start_background(self._window_loop, "windows")
+
+    def start_background(self, target, name: str) -> None:
+        thread = threading.Thread(target=target, daemon=True, name=name)
+        self.background_threads.append(thread)
+        thread.start()
 
     def stop(self) -> None:
-        for worker in (self.face, self.judge, self.voice):
+        if self.stopped.is_set():
+            return
+        self.stopped.set()
+        workers = (self.face, self.judge, self.voice, self.hands, self.narrator)
+        for worker in workers:
             worker.stopped.set()
+        # Close Clef before joining: wakes the judge even while loading/inferencing.
+        for worker in workers:
+            worker.stop()
+        for worker in (*workers, *self.background_threads):
+            if worker.ident is not None:
+                worker.join()
+        self.store.close()
+        logger.info("Facet workers stopped and data store closed")
 
     def push(self, event: dict) -> None:
         with self.lock:
@@ -90,6 +120,8 @@ class Hub:
         self.latest[kind] = verdict
         self.store.add_verdict(kind, verdict)
         self.push({"type": "verdict", "kind": kind, "data": verdict, "latency_ms": self.judge.latency.get(kind)})
+        if kind == "face":
+            self.wellness.activity(verdict)
         if kind == "overall":
             self._maybe_notify(verdict)
 
@@ -122,8 +154,7 @@ class Hub:
 
     def _window_loop(self) -> None:
         last_baseline = time.time()
-        while not self.face.stopped.is_set():
-            time.sleep(config.FACE_WINDOW_SECONDS)
+        while not self.stopped.wait(config.FACE_WINDOW_SECONDS):
             if self.paused:
                 continue
             window = self.face.take_window()
@@ -161,6 +192,7 @@ class Hub:
                 "difference_from_their_usual_face_in_standard_deviations": z or "not enough history yet",
             },
             "posture": self._posture_state(snap),
+            "recent_captions": list(self.captions),
             "session": {
                 "minutes_at_desk_since_last_break": round(self._minutes_since_break_cached(), 1),
                 "local_time": datetime.now().strftime("%H:%M"),
@@ -179,7 +211,7 @@ class Hub:
         p = snap.posture
         if not p.visible or p.state == "unknown":
             return "not measured yet"
-        return {"score_0_to_100": p.score, "state": p.state, "issues": p.issues or "none"}
+        return {"score_0_to_100": p.score, "state": p.state, "issues": p.issues or "none", "stale": p.stale}
 
     def _recent_posture(self, seconds: float) -> list[float]:
         rows = self.store._query("SELECT data FROM face_windows WHERE ts > ? AND neutral=0", (time.time() - seconds,))
@@ -199,25 +231,19 @@ class Hub:
     def _maybe_notify(self, verdict: dict) -> None:
         if not self.settings["notifications"]:
             return
-        now = time.time()
         recent = self.store.recent_verdicts("overall", 600)
         messages = []
         if len(recent) >= 20 and np.mean([v["stress"] for _, v in recent]) >= 2.5:
             messages.append(("stress", "You've looked stressed for ten minutes. Unclench your jaw and drop your shoulders."))
-        if verdict["needs_break"] > 0.75 and self._minutes_since_break_cached() > 90:
-            messages.append(("break", f"{int(self._minutes_since_break_cached())} minutes at the desk without a break. Stand up for a few."))
+        if self._minutes_since_break_cached() >= 50:
+            messages.append(("stand", "You've been at the desk for 50 minutes without a break. Stand up and stretch."))
         if len(recent) >= 20 and np.mean([v["fatigue"] for _, v in recent]) >= 2.8:
             messages.append(("fatigue", "You've looked tired for a while. Water, light, or a short walk might help."))
         posture = self._recent_posture(600)
         if len(posture) >= 90 and sum(1 for x in posture if x < 55) / len(posture) >= 0.7:
             messages.append(("posture", "You've been slouching for ten minutes. Sit back, chin in, shoulders down, or stand up for a minute."))
         for key, text in messages:
-            if now - self.last_notified.get(key, 0) < 1800:
-                continue
-            self.last_notified[key] = now
-            self.store.add_event("notification", {"kind": key, "text": text})
-            self.push({"type": "notification", "data": {"kind": key, "text": text}})
-            subprocess.run(["osascript", "-e", f'display notification {json.dumps(text)} with title "Facet"'], check=False)
+            self.notify(key, text)
 
     def status(self) -> dict:
         return {
@@ -241,6 +267,7 @@ class Hub:
         metrics = {k: round(v, 3) for k, v in snap.metrics.items()}
         return {
             "type": "live",
+            **self.live_features(),
             "face": {
                 "present": snap.present,
                 "metrics": metrics,
@@ -255,6 +282,7 @@ class Hub:
             "minutes_since_break": round(self._minutes_since_break_cached(), 1),
             "posture": {
                 "visible": snap.posture.visible,
+                "stale": snap.posture.stale,
                 "score": snap.posture.score,
                 "state": snap.posture.state,
                 "issues": snap.posture.issues,
@@ -278,131 +306,21 @@ class Hub:
         return v
 
 
-hub: Hub
-
-
-app = FastAPI(title="Facet")
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    global hub
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()
     hub = Hub()
-    hub.start()
-
-
-@app.on_event("shutdown")
-def _shutdown() -> None:
-    hub.stop()
-
-
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
-
-
-@app.get("/api/state")
-def state() -> JSONResponse:
-    return JSONResponse({**hub.live(), "latest": hub.latest})
-
-
-@app.get("/api/timeline")
-def timeline(date: str | None = None, bucket: int = 5) -> JSONResponse:
-    return JSONResponse(hub.store.timeline(date, bucket))
-
-
-@app.get("/api/summary")
-def summary(date: str | None = None) -> JSONResponse:
-    return JSONResponse(hub.store.summary(date))
-
-
-@app.get("/api/speech")
-def speech(minutes: int = 60) -> JSONResponse:
-    return JSONResponse(hub.store.recent_speech(minutes * 60))
-
-
-@app.post("/api/calibrate")
-def calibrate(seconds: int = 30) -> JSONResponse:
-    hub.calibrating_until = time.time() + seconds
-
-    def finish() -> None:
-        time.sleep(seconds + config.FACE_WINDOW_SECONDS + 1)
-        hub.store.refresh_baseline()
-        hub.apply_baseline()
-        hub.store.add_event("calibration", {"seconds": seconds})
-        hub.push({"type": "calibrated", "data": hub.status()})
-
-    threading.Thread(target=finish, daemon=True).start()
-    return JSONResponse(hub.status())
-
-
-@app.post("/api/pause")
-def pause() -> JSONResponse:
-    hub.paused = True
-    hub.face.paused.set()
-    hub.judge.paused.set()
-    hub.voice.paused.set()
-    return JSONResponse(hub.status())
-
-
-@app.post("/api/resume")
-def resume() -> JSONResponse:
-    hub.paused = False
-    hub.face.paused.clear()
-    hub.judge.paused.clear()
-    if hub.settings["mic"]:
-        hub.voice.paused.clear()
-    return JSONResponse(hub.status())
-
-
-@app.post("/api/settings")
-async def settings(body: dict) -> JSONResponse:
-    for key in ("notifications", "mic", "store_transcripts"):
-        if key in body:
-            hub.settings[key] = bool(body[key])
-            hub.store.set_setting(key, bool(body[key]))
-    if hub.settings["mic"] and not hub.paused:
-        hub.voice.paused.clear()
-    else:
-        hub.voice.paused.set()
-    return JSONResponse(hub.status())
-
-
-@app.get("/video.mjpg")
-async def video() -> StreamingResponse:
-    async def frames():
-        hub.face.preview_clients += 1
-        last = None
-        try:
-            while True:
-                jpeg = hub.face.preview_jpeg
-                if jpeg and jpeg is not last:
-                    last = jpeg
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                await asyncio.sleep(1 / 15)
-        finally:
-            hub.face.preview_clients -= 1
-
-    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-
-@app.websocket("/ws")
-async def ws(socket: WebSocket) -> None:
-    await socket.accept()
-    with hub.lock:
-        last = hub.seq
-    await socket.send_json({"type": "hello", "latest": hub.latest, "status": hub.status()})
+    app.state.hub = hub
     try:
-        while True:
-            await socket.send_json(hub.live())
-            with hub.lock:
-                fresh = [e for s, e in hub.events if s > last]
-                last = hub.seq
-            for event in fresh:
-                await socket.send_json(event)
-            await asyncio.sleep(0.2)
-    except (WebSocketDisconnect, RuntimeError):
-        pass
+        await asyncio.to_thread(hub.start)
+        yield
+    finally:
+        await asyncio.to_thread(hub.stop)
+
+
+app = FastAPI(title="Facet", lifespan=lifespan)
+
+register_routes(app)
 
 
 def main() -> None:
@@ -410,12 +328,21 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Facet: a local mirror for your face and voice")
     parser.add_argument("--no-browser", action="store_true", help="do not open the dashboard")
+    parser.add_argument("--host", default=config.HOST, help="bind host (default: FACET_HOST or 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=config.PORT, help="bind port (default: FACET_PORT or 8765)")
     args = parser.parse_args()
-    url = f"http://{config.HOST}:{config.PORT}/"
+    configure_logging()
+    url = f"http://{args.host}:{args.port}/"
     if not args.no_browser:
-        threading.Timer(2.0, lambda: webbrowser.open(url)).start()
-    print(f"Facet dashboard: {url}", flush=True)
-    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
+        browser_timer = threading.Timer(2.0, lambda: webbrowser.open(url))
+        browser_timer.daemon = True
+        browser_timer.start()
+    logger.info("Facet dashboard: %s", url)
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning", log_config=None)
+    finally:
+        if not args.no_browser:
+            browser_timer.cancel()
 
 
 if __name__ == "__main__":

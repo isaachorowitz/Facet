@@ -1,0 +1,23 @@
+{
+  "type": "verdict",
+  "kind": "overall",
+  "data": {
+    "ts": 1790884801.25,
+    "mood": {
+      "choice": "focused",
+      "confidence": 0.72,
+      "probabilities": {
+        "focused": 0.72,
+        "neutral": 0.28
+      }
+    },
+    "stress": 1.3,
+    "fatigue": 0.8,
+    "focus": 3.2,
+    "positivity": 2.4,
+    "needs_break": 0.1,
+    "in_flow": 0.8,
+    "overwhelmed": 0.05
+  },
+  "latency_ms": 701
+}

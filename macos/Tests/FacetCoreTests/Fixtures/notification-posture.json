@@ -1,0 +1,7 @@
+{
+  "type": "notification",
+  "data": {
+    "kind": "posture",
+    "text": "Your head is dropping forward. Sit upright."
+  }
+}

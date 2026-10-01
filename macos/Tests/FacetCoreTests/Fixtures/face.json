@@ -1,0 +1,46 @@
+{
+  "type": "verdict",
+  "kind": "face",
+  "data": {
+    "ts": 1790884800.25,
+    "expression": {
+      "choice": "focused",
+      "confidence": 0.72,
+      "probabilities": {
+        "focused": 0.72,
+        "neutral": 0.28
+      }
+    },
+    "stress": 1.2,
+    "fatigue": 0.7,
+    "focus": 3.1,
+    "energy": 2.8,
+    "positivity": 2.4,
+    "tension": 0.9,
+    "smiling": 0.3,
+    "frowning": 0.1,
+    "jaw_clenched": 0.2,
+    "eyes_heavy": 0.1,
+    "eyes_on_screen": 0.95,
+    "hand_on_face": 0.05,
+    "talking": 0.2,
+    "yawning": 0.01,
+    "distracted": 0.05,
+    "posture": {
+      "choice": "upright",
+      "confidence": 0.8,
+      "probabilities": {
+        "upright": 0.8,
+        "slumped": 0.2
+      }
+    },
+    "activity": {
+      "choice": "working",
+      "confidence": 0.9,
+      "probabilities": {
+        "working": 0.9
+      }
+    }
+  },
+  "latency_ms": 825.3
+}

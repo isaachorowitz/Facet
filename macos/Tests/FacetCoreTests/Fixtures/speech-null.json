@@ -1,0 +1,22 @@
+{
+  "type": "speech",
+  "data": {
+    "ts": 1790884802,
+    "text": "",
+    "prosody": {
+      "duration_s": 4.2,
+      "words_per_minute": 140.5,
+      "pitch_hz": 160.7,
+      "pitch_variation_semitones": 3.8,
+      "loudness_db": -24.3,
+      "pause_ratio": 0.18
+    },
+    "emotion": {
+      "neutral": 0.82,
+      "happy": 0.15,
+      "angry": 0.01,
+      "sad": 0.02
+    },
+    "verdict": null
+  }
+}

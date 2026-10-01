@@ -1,0 +1,29 @@
+{
+  "paused": false,
+  "camera": "on",
+  "camera_error": null,
+  "judge": "ready",
+  "judge_error": null,
+  "latency_ms": {
+    "face": 825.3,
+    "face_detail": 1900,
+    "voice": 640,
+    "overall": 701
+  },
+  "voice": "listening",
+  "voice_error": null,
+  "mic": "Razer Seiren",
+  "calibrating_seconds_left": 0,
+  "baseline_samples": 85,
+  "baseline": {
+    "smile": {
+      "mean": 0.25,
+      "std": 0.09
+    }
+  },
+  "settings": {
+    "notifications": true,
+    "mic": true,
+    "store_transcripts": false
+  }
+}

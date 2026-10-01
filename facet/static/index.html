@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Facet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ground: #09090a; --card: #131315; --card2: #101012; --hair: rgba(255,255,255,.06); --hair2: rgba(255,255,255,.09);
+  --text: #e9e6df; --soft: #cfcbc2; --mid: #bdb9b1; --muted: #8a877f; --faint: #6f6c66; --ghost: #4a4843;
+  --amber: #f3b562; --ice: #8fb8ff; --lilac: #b9a6ff; --mint: #7fd6a4; --coral: #ef8f72; --sand: #c9b48f;
+  --r: 18px; --ease: cubic-bezier(.2,.8,.2,1); --spring: cubic-bezier(.34,1.56,.64,1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--ground); color: var(--text); overflow: hidden; }
+body { font: 13px/1.4 Geist, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+.mono { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.serif { font-family: "Instrument Serif", Georgia, serif; }
+.lab { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.lab.sm { font-size: 9.5px; }
+.grow { flex: 1; }
+.dot { width: 6px; height: 6px; border-radius: 3px; display: inline-block; flex: none; }
+
+/* ---------- atmosphere ---------- */
+.bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.bg i { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .5; animation: drift 38s ease-in-out infinite alternate; }
+.bg i:nth-child(1) { width: 620px; height: 620px; left: 26%; top: -12%; background: rgba(243,181,98,.07); }
+.bg i:nth-child(2) { width: 700px; height: 700px; right: -10%; top: 30%; background: rgba(143,184,255,.06); animation-duration: 46s; animation-delay: -12s; }
+.bg i:nth-child(3) { width: 520px; height: 520px; left: -8%; bottom: -20%; background: rgba(185,166,255,.05); animation-duration: 52s; animation-delay: -24s; }
+@keyframes drift { to { transform: translate(80px, 60px) scale(1.12); } }
+.grain { position: fixed; inset: -50%; z-index: 50; pointer-events: none; opacity: .045; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); animation: grain 1.2s steps(6) infinite; }
+@keyframes grain { 0% { transform: translate(0,0) } 20% { transform: translate(-3%,2%) } 40% { transform: translate(2%,-3%) } 60% { transform: translate(-2%,-1%) } 80% { transform: translate(3%,3%) } 100% { transform: translate(0,0) } }
+
+#app { position: relative; z-index: 1; height: 100vh; min-height: 640px; padding: 14px 18px 18px; display: grid; grid-template-rows: 46px minmax(0, 1fr) clamp(168px, 23vh, 210px); gap: 14px; transition: filter 1.2s var(--ease); }
+#app.paused { filter: saturate(.25) brightness(.8); }
+
+/* ---------- cards ---------- */
+.card { position: relative; background: linear-gradient(180deg, var(--card) 0%, var(--card2) 100%); border: 1px solid var(--hair); border-radius: var(--r); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 20px 40px -24px rgba(0,0,0,.6); min-height: 0; min-width: 0; overflow: hidden; transition: border-color .6s, box-shadow .6s; }
+.card::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .4s; background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.045), transparent 60%); }
+.card:hover::before { opacity: 1; }
+.card.alert { border-color: rgba(239,143,114,.4); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 0 0 1px rgba(239,143,114,.12), 0 0 40px -10px rgba(239,143,114,.35); animation: alertPulse 2.4s ease-in-out infinite; }
+@keyframes alertPulse { 50% { box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 0 0 1px rgba(239,143,114,.05), 0 0 24px -10px rgba(239,143,114,.15); } }
+.card.speaking { border-color: rgba(243,181,98,.28); }
+.enter { opacity: 0; transform: translateY(14px) scale(.985); filter: blur(6px); animation: enter .9s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 90ms + 120ms); }
+@keyframes enter { to { opacity: 1; transform: none; filter: none; } }
+
+.btn { height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--hair2); background: rgba(22,22,24,.8); color: var(--text); font-weight: 500; font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: border-color .2s, background .2s, color .2s, transform .15s var(--spring); white-space: nowrap; }
+.btn:hover { border-color: rgba(255,255,255,.22); }
+.btn:active { transform: scale(.96); }
+.btn.solid { background: var(--text); color: #0c0c0d; border-color: var(--text); }
+.btn.off { color: var(--faint); }
+.btn.off svg { opacity: .5; }
+.btn.small { height: 26px; padding: 0 10px; font-size: 11.5px; border-radius: 8px; color: var(--muted); }
+.btn.small.sel { background: #222225; color: var(--text); }
+.btn.live-mic { border-color: rgba(243,181,98,.45); box-shadow: 0 0 18px -6px rgba(243,181,98,.6); }
+
+.track { height: 4px; border-radius: 4px; background: rgba(255,255,255,.06); position: relative; }
+.fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; overflow: hidden; transition: width .9s var(--ease), background .8s; }
+.fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); transform: translateX(-100%); }
+.fill.shine::after { animation: shine .9s var(--ease); }
+@keyframes shine { to { transform: translateX(100%); } }
+.tick { position: absolute; top: -3px; width: 1.5px; height: 10px; background: var(--text); opacity: .5; border-radius: 1px; transition: left .9s var(--ease); }
+
+.chip { height: 26px; padding: 0 10px; border-radius: 13px; font-size: 11.5px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(255,255,255,.07); color: var(--faint); transition: color .4s, border-color .4s, background .4s; white-space: nowrap; }
+.chip .mono { opacity: .8; font-size: 10.5px; }
+.chip.on { color: var(--text); border-color: rgba(143,184,255,.35); background: rgba(143,184,255,.08); }
+.chip.hot { color: #ffd9a8; border-color: rgba(243,181,98,.45); background: rgba(243,181,98,.10); }
+.chip.pop { animation: pop .5s var(--spring); }
+@keyframes pop { 40% { transform: scale(1.09); } }
+
+/* ---------- header ---------- */
+header { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand .serif { font-size: 28px; line-height: 1; letter-spacing: -.01em; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.live .dot { background: var(--mint); box-shadow: 0 0 10px var(--mint); animation: breathe 2.4s ease-in-out infinite; }
+.live.paused .dot { background: var(--faint); box-shadow: none; animation: none; }
+@keyframes breathe { 50% { opacity: .3; transform: scale(.8); } }
+.sys { display: flex; gap: 22px; margin-left: 14px; font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; white-space: nowrap; align-items: center; }
+.sys b { font-weight: 400; color: var(--text); transition: color .4s; }
+.sys .warn { color: var(--amber); }
+.sys .bad { color: #ff8a80; }
+.beat { width: 14px; height: 14px; vertical-align: -3px; margin-right: 5px; }
+.beat circle { transition: stroke-dashoffset .25s linear; }
+.clock { font-size: 13px; color: var(--muted); }
+.clock .sec { color: var(--faint); }
+
+/* ---------- layout ---------- */
+.cols { display: grid; grid-template-columns: minmax(0, 30fr) minmax(0, 40fr) minmax(0, 30fr); gap: 14px; min-height: 0; }
+.col { display: grid; gap: 14px; min-height: 0; }
+
+/* ---------- mirror ---------- */
+.mirror { padding: 0; background: #0b0b0c; }
+.mirror img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity 1s; }
+.mirror img.ready { opacity: 1; }
+.veil { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); background: radial-gradient(circle at 50% 45%, #17171a, #0b0b0c 70%); transition: opacity .8s; z-index: 2; }
+.veil[hidden] { display: grid; opacity: 0; pointer-events: none; }
+.veil .orb { width: 70px; height: 70px; border-radius: 50%; border: 1px solid var(--hair2); display: grid; place-items: center; animation: breathe 3s ease-in-out infinite; margin: 0 auto 12px; }
+.scan { position: absolute; left: 0; right: 0; height: 120px; top: -120px; background: linear-gradient(180deg, transparent, rgba(127,214,164,.07) 70%, rgba(127,214,164,.22) 100%); border-bottom: 1px solid rgba(127,214,164,.35); pointer-events: none; z-index: 1; opacity: 0; }
+.mirror.tracking .scan { animation: scan 5.5s cubic-bezier(.45,0,.55,1) infinite; }
+@keyframes scan { 0% { top: -120px; opacity: 0; } 8% { opacity: 1; } 55% { top: 100%; opacity: .9; } 56%, 100% { top: 100%; opacity: 0; } }
+.brackets { position: absolute; inset: 22% 22% 30% 22%; pointer-events: none; z-index: 1; transition: inset .9s var(--ease), opacity .6s; opacity: .25; }
+.mirror.tracking .brackets { inset: 14% 24% 40% 24%; opacity: .9; }
+.brackets i { position: absolute; width: 18px; height: 18px; border-color: var(--mint); border-style: solid; border-width: 0; }
+.brackets i:nth-child(1) { left: 0; top: 0; border-left-width: 1.5px; border-top-width: 1.5px; border-top-left-radius: 6px; }
+.brackets i:nth-child(2) { right: 0; top: 0; border-right-width: 1.5px; border-top-width: 1.5px; border-top-right-radius: 6px; }
+.brackets i:nth-child(3) { left: 0; bottom: 0; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: 6px; }
+.brackets i:nth-child(4) { right: 0; bottom: 0; border-right-width: 1.5px; border-bottom-width: 1.5px; border-bottom-right-radius: 6px; }
+.mirror .tags { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; z-index: 3; }
+.mirror .tags .chip { background: rgba(10,10,11,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--text); }
+.vitals { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; padding: 64px 16px 14px; background: linear-gradient(180deg, transparent, rgba(8,8,9,.75) 40%, rgba(8,8,9,.96)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vitals .v { font-size: 19px; margin-top: 3px; text-shadow: 0 1px 8px rgba(0,0,0,.6); }
+.vitals .lab { color: #a9a59c; }
+.vitals .u { font-size: 11px; color: var(--muted); margin-left: 3px; }
+.calib { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: rgba(8,8,9,.55); backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity .6s; text-align: center; }
+.calib.on { opacity: 1; }
+.calib svg { width: 120px; height: 120px; }
+.calib .n { font-size: 34px; margin-top: -78px; margin-bottom: 52px; }
+.calib p { margin: 6px 24px 0; color: var(--soft); font-size: 13px; line-height: 1.45; }
+
+.measured { padding: 14px 16px; }
+.mgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; row-gap: 9px; }
+.mrow .top { display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 5px; color: var(--mid); }
+.mrow .z { font-size: 10.5px; transition: color .5s; }
+
+/* ---------- now ---------- */
+.now { display: grid; grid-template-rows: minmax(0, 1fr) auto; padding: 22px 24px 18px; }
+.aura { position: absolute; left: 66%; top: 40%; width: 640px; height: 640px; transform: translate(-50%, -50%); pointer-events: none; transition: background 2.5s; animation: auraBreathe 7s ease-in-out infinite; }
+@keyframes auraBreathe { 50% { transform: translate(-50%, -50%) scale(1.08); } }
+.hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr) auto; align-items: center; gap: 12px 10px; min-height: 0; padding-bottom: 14px; }
+.mood { font-size: clamp(44px, 4.8vw, 80px); line-height: .95; letter-spacing: -.02em; margin-top: 12px; font-style: italic; white-space: nowrap; min-height: 1em; }
+.mood span { display: inline-block; animation: letterIn .7s var(--ease) both; }
+.mood span.out { animation: letterOut .35s ease-in both; }
+@keyframes letterIn { from { opacity: 0; transform: translateY(.25em) rotate(4deg); filter: blur(10px); } }
+@keyframes letterOut { to { opacity: 0; transform: translateY(-.2em); filter: blur(8px); } }
+.conf { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.conf .sep { width: 3px; height: 3px; border-radius: 2px; background: var(--ghost); }
+.sentence { font-size: 14.5px; line-height: 1.5; color: var(--soft); max-width: 360px; margin: 14px 0 0; min-height: 44px; transition: opacity .4s; }
+.flags { grid-column: 1 / -1; display: flex; gap: 6px; overflow: hidden; mask-image: linear-gradient(90deg, #000 88%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); padding: 2px 0; }
+.ring { position: relative; width: clamp(180px, 17vw, 250px); aspect-ratio: 1; }
+.ring svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.ring .arc { transition: stroke-dasharray 1.2s var(--ease); }
+.ring .tip { transition: transform 1.2s var(--ease); transform-origin: 150px 150px; }
+.ring .tip circle { filter: drop-shadow(0 0 6px currentColor); }
+.ring .sheen { transform-origin: 150px 150px; animation: spin 18s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ring .ripple { transform-origin: 150px 150px; opacity: 0; }
+.ring .ripple.go { animation: ripple 1.4s var(--ease); }
+@keyframes ripple { from { opacity: .55; transform: scale(.55); } to { opacity: 0; transform: scale(1.12); } }
+.ring .center { position: absolute; left: 0; right: 0; bottom: 7%; text-align: center; }
+.ring .center .mono { font-size: 30px; }
+.lower { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; padding-top: 16px; border-top: 1px solid var(--hair); }
+.srow { display: grid; grid-template-columns: 74px minmax(0, 1fr) 64px; align-items: center; gap: 10px; font-size: 12px; }
+.srow .name { display: flex; align-items: center; gap: 7px; color: var(--mid); }
+.srow .word { color: var(--muted); text-align: right; font-size: 11.5px; }
+.erow { display: grid; grid-template-columns: 74px minmax(0, 1fr) 34px; align-items: center; gap: 10px; font-size: 12px; transition: transform .6s var(--ease); }
+.erow span:first-child { color: var(--mid); text-transform: capitalize; }
+.erow .mono { color: var(--muted); text-align: right; font-size: 11px; }
+.stack { display: grid; gap: 7px; }
+
+/* ---------- right ---------- */
+.right { grid-template-rows: auto minmax(0, 1fr) minmax(0, .82fr); }
+.pad { padding: 16px 18px; }
+.overall .word { font-size: 36px; line-height: 1; font-style: italic; text-transform: capitalize; transition: opacity .4s; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.posture { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; }
+.pbody { display: grid; grid-template-columns: minmax(0, 1fr) 128px; gap: 10px; min-height: 0; align-items: center; }
+.figure { position: relative; height: 100%; min-height: 110px; }
+.figure svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.figure .bone { stroke-linecap: round; transition: stroke .8s; }
+.figure .ghost { stroke: rgba(233,230,223,.28); stroke-dasharray: 3 4; fill: none; }
+.pscore { text-align: right; }
+.pscore .n { font-size: 40px; line-height: 1; }
+.pscore .st { font-size: 13px; margin-top: 4px; text-transform: capitalize; transition: color .6s; }
+.issues { display: grid; gap: 4px; margin-top: 10px; font-size: 11.5px; color: var(--soft); text-align: right; min-height: 34px; }
+.issues div { animation: rise .4s var(--ease); }
+.pmetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 10px; border-top: 1px solid var(--hair); }
+.pmetrics .v { font-size: 14px; margin-top: 2px; }
+.pmetrics .u { font-size: 10px; color: var(--muted); margin-left: 2px; }
+
+.voice { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; }
+.wave { display: flex; align-items: center; gap: 2px; height: 22px; }
+.wave span { flex: 1; border-radius: 2px; background: rgba(233,230,223,.2); height: 3px; transition: height .12s linear, background .3s; }
+.utters { display: grid; gap: 9px; align-content: start; min-height: 0; overflow: hidden; mask-image: linear-gradient(180deg, #000 75%, transparent); -webkit-mask-image: linear-gradient(180deg, #000 75%, transparent); }
+.utter { display: grid; gap: 5px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.05); animation: rise .6s var(--ease); }
+.utter .t { font-size: 13px; line-height: 1.4; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.utter .meta { display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.utter .chip { height: 20px; font-size: 10.5px; }
+.caret { display: inline-block; width: 1px; height: 1em; background: var(--amber); vertical-align: -2px; margin-left: 1px; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } }
+
+/* ---------- day ---------- */
+.day { padding: 16px 20px; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; }
+.chart { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; min-height: 0; }
+.chart .head { display: flex; align-items: center; gap: 18px; }
+.legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); }
+.legend .dot { margin-right: 6px; }
+.plot { position: relative; min-height: 0; cursor: crosshair; }
+.plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.plot path.line { stroke-dasharray: var(--len, 4000); stroke-dashoffset: 0; }
+.plot path.line.dotted { stroke-dasharray: 2 4; }
+.plot path.line.draw { animation: draw 1.8s var(--ease) both; }
+@keyframes draw { from { stroke-dashoffset: var(--len, 4000); } }
+.plot .label { position: absolute; font-size: 10.5px; white-space: nowrap; pointer-events: none; animation: rise .6s var(--ease) both; }
+.plot .nowline { position: absolute; top: 0; bottom: 0; width: 1px; background: linear-gradient(180deg, transparent, rgba(233,230,223,.5), transparent); pointer-events: none; }
+.plot .nowline::after { content: ""; position: absolute; left: -3px; top: 50%; width: 7px; height: 7px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 0 rgba(233,230,223,.5); animation: nowPulse 2s infinite; }
+@keyframes nowPulse { 70% { box-shadow: 0 0 0 10px rgba(233,230,223,0); } 100% { box-shadow: 0 0 0 0 rgba(233,230,223,0); } }
+.cross { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(233,230,223,.35); pointer-events: none; opacity: 0; transition: opacity .2s; }
+.ttip { position: absolute; top: 4px; pointer-events: none; background: rgba(16,16,18,.92); border: 1px solid var(--hair2); border-radius: 10px; padding: 8px 10px; font-size: 11.5px; min-width: 150px; opacity: 0; transition: opacity .2s; backdrop-filter: blur(8px); z-index: 4; }
+.ttip .r { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
+.ttip .r b { font-weight: 400; color: var(--text); }
+.plot:hover .cross, .plot:hover .ttip.has { opacity: 1; }
+.strip { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+.strip span { flex: 1; transition: background .8s; }
+.hours { display: flex; justify-content: space-between; font-size: 10px; color: var(--faint); }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; align-content: center; border-left: 1px solid var(--hair); padding-left: 24px; }
+.stats .v { font-size: 20px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats .s { font-size: 11.5px; color: var(--muted); margin-left: 5px; }
+.empty { color: var(--faint); font-size: 12px; }
+#day { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; right: 0; top: 0; }
+
+.toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 30px) scale(.96); opacity: 0; background: rgba(28,24,18,.94); border: 1px solid rgba(243,181,98,.35); color: #ffe2b8; padding: 13px 20px; border-radius: 14px; font-size: 13px; backdrop-filter: blur(12px); transition: all .6s var(--spring); pointer-events: none; z-index: 60; max-width: 480px; text-align: center; box-shadow: 0 20px 50px -10px rgba(0,0,0,.7); }
+.toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+
+@media (max-width: 1180px) {
+  .sys span:nth-child(n+3) { display: none; }
+  .day { grid-template-columns: minmax(0, 1fr); } .stats { display: none; }
+}
+@media (max-height: 800px) {
+  .measured .mgrid .mrow:nth-child(n+7) { display: none; }
+  .sentence { display: none; }
+  .pmetrics { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .enter { opacity: 1; transform: none; filter: none; }
+}
+</style>
+</head>
+<body>
+<div class="bg"><i></i><i></i><i></i></div>
+<div class="grain"></div>
+<div id="app">
+  <header class="enter" style="--i:0">
+    <div class="brand"><span class="serif">Facet</span><span class="live" id="live"><span class="dot"></span><span id="liveText">Live · on device</span></span></div>
+    <div class="sys">
+      <span>Camera <b class="mono" id="sCam">–</b></span>
+      <span><svg class="beat" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="2"/><circle id="beat" cx="8" cy="8" r="6" fill="none" stroke="#8fb8ff" stroke-width="2" stroke-dasharray="37.7" stroke-dashoffset="37.7" transform="rotate(-90 8 8)" stroke-linecap="round"/></svg>Clef-flash <b class="mono" id="sClef">loading</b></span>
+      <span>Mic <b id="sMic">–</b></span>
+      <span>Baseline <b id="sBase">–</b></span>
+    </div>
+    <div class="grow"></div>
+    <span class="mono clock" id="clock"></span>
+    <button class="btn" type="button" id="bCal" title="Sit upright and relaxed, face the screen, for 30 seconds">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15h6"/></svg>Calibrate</button>
+    <button class="btn" type="button" id="bMic" aria-pressed="true">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Mic</button>
+    <button class="btn" type="button" id="bNudge" aria-pressed="true">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>Nudges</button>
+    <button class="btn solid" type="button" id="bPause">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" id="pauseIcon"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><span id="pauseText">Pause</span></button>
+  </header>
+
+  <div class="cols">
+    <div class="col" style="grid-template-rows: minmax(0, 1fr) auto">
+      <section class="card mirror enter" style="--i:1" id="mirror">
+        <img id="video" alt="Live camera, mirrored">
+        <div class="scan"></div>
+        <div class="brackets"><i></i><i></i><i></i><i></i></div>
+        <div class="veil" id="veil"><div><div class="orb"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></svg></div><div id="veilText">Starting camera</div></div></div>
+        <div class="tags"><span class="chip" id="tTrack"><span class="dot" style="background:var(--faint)"></span>No face</span><span class="chip" id="tGaze" hidden>Eyes on screen</span></div>
+        <div class="vitals">
+          <div><div class="lab sm">Blinks</div><div class="v mono"><span id="vBlink">–</span><span class="u">/min</span></div></div>
+          <div><div class="lab sm">Head</div><div class="v mono" id="vHead">–</div></div>
+          <div><div class="lab sm">Sitting</div><div class="v mono"><span id="vDesk">–</span><span class="u">min</span></div></div>
+          <div><div class="lab sm">Distance</div><div class="v mono"><span id="vDist">–</span><span class="u">cm</span></div></div>
+        </div>
+        <div class="calib" id="calib">
+          <div>
+            <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="3"/><circle id="calibArc" cx="60" cy="60" r="52" fill="none" stroke="#7fd6a4" stroke-width="3" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0" transform="rotate(-90 60 60)" style="transition:stroke-dashoffset 1s linear"/></svg>
+            <div class="n mono" id="calibN">30</div>
+            <div class="lab">Calibrating</div>
+            <p>Sit upright and relaxed.<br>Neutral face, eyes on the screen.</p>
+          </div>
+        </div>
+      </section>
+      <section class="card measured enter" style="--i:4">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="lab">Measured face</span><span style="font-size:10.5px;color:var(--faint)" id="mNote">tick = your usual</span></div>
+        <div class="mgrid" id="measured"></div>
+      </section>
+    </div>
+
+    <section class="card now enter" style="--i:2" id="nowCard">
+      <div class="aura" id="aura"></div>
+      <div class="hero">
+        <div style="min-width:0">
+          <div class="lab">Right now · your face</div>
+          <div class="mood serif" id="mood"></div>
+          <div class="conf" id="conf">Clef-flash is loading onto the GPU</div>
+          <p class="sentence" id="sentence"></p>
+        </div>
+        <div class="ring">
+          <svg viewBox="0 0 300 300" id="ring"></svg>
+          <div class="center"><div class="mono" id="ringVal">–</div><div class="lab sm">stress / 4</div></div>
+        </div>
+        <div class="flags" id="flags"></div>
+      </div>
+      <div class="lower">
+        <div class="stack" id="scores"></div>
+        <div><div class="lab" style="margin-bottom:9px">Expression</div><div class="stack" style="gap:6px;position:relative" id="expr"></div></div>
+      </div>
+    </section>
+
+    <div class="col right">
+      <section class="card pad overall enter" style="--i:3">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="lab">Overall read</span><span style="font-size:10.5px;color:var(--faint)">face · voice · posture · baseline</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px;margin-top:10px;min-width:0"><span class="word serif" id="ovWord">–</span><span style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="ovSub">first read in about 15 s</span></div>
+        <div class="chips" style="margin-top:12px" id="ovChips"></div>
+      </section>
+
+      <section class="card pad posture enter" style="--i:5" id="postureCard">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="lab">Posture</span><span style="font-size:10.5px;color:var(--faint)" id="pRef">learning your upright posture</span></div>
+        <div class="pbody">
+          <div class="figure"><svg id="figure" viewBox="-95 -125 190 175" preserveAspectRatio="xMidYMid meet"></svg></div>
+          <div class="pscore">
+            <div class="n mono" id="pScore">–</div>
+            <div class="st" id="pState" style="color:var(--muted)">measuring</div>
+            <div class="issues" id="pIssues"></div>
+          </div>
+        </div>
+        <div class="pmetrics">
+          <div><div class="lab sm">Neck</div><div class="v mono"><span id="pNeck">–</span><span class="u">%</span></div></div>
+          <div><div class="lab sm">Shoulders</div><div class="v mono"><span id="pTilt">–</span><span class="u">°</span></div></div>
+          <div><div class="lab sm">Lean in</div><div class="v mono"><span id="pLean">–</span><span class="u">%</span></div></div>
+          <div><div class="lab sm">Good today</div><div class="v mono"><span id="pGood">–</span><span class="u">%</span></div></div>
+        </div>
+      </section>
+
+      <section class="card pad voice enter" style="--i:6" id="voiceCard">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span class="lab">Voice</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)" id="vState"><span class="dot" style="background:var(--faint)"></span>Listening</span></div>
+        <div class="wave" id="wave"></div>
+        <div class="utters" id="utters"><div class="empty">Nothing heard yet.</div></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card day enter" style="--i:7">
+    <div class="chart">
+      <div class="head">
+        <span class="lab" id="dayTitle">Today</span>
+        <span class="legend"><span><span class="dot" style="background:var(--amber)"></span>stress</span><span><span class="dot" style="background:var(--ice)"></span>focus</span><span><span class="dot" style="background:var(--lilac)"></span>fatigue</span><span><span class="dot" style="background:var(--mint)"></span>mood</span><span><span class="dot" style="background:var(--sand)"></span>posture</span></span>
+        <div class="grow"></div>
+        <span style="display:flex;gap:4px;position:relative">
+          <button class="btn small sel" type="button" id="rDay">Today</button>
+          <button class="btn small" type="button" id="rLive">Last 10 min</button>
+          <button class="btn small" type="button" id="rPick" aria-label="Pick a day"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></button>
+          <input type="date" id="day" aria-label="Day">
+        </span>
+      </div>
+      <div class="plot" id="plot">
+        <svg id="plotSvg" preserveAspectRatio="none" viewBox="0 0 1000 120"></svg>
+        <div class="cross" id="cross"></div>
+        <div class="ttip" id="tip"></div>
+      </div>
+      <div style="display:grid;gap:4px"><div class="strip" id="strip"></div><div class="hours mono" id="hours"></div></div>
+    </div>
+    <div class="stats" id="stats"></div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const C = { stress: "#f3b562", tension: "#ef8f72", fatigue: "#b9a6ff", focus: "#8fb8ff", positivity: "#7fd6a4", posture: "#c9b48f" };
+const EXPR = { happy: "#7fd6a4", content: "#9fdcbc", neutral: "#6f6c66", focused: "#8fb8ff", serious: "#c9b48f", tired: "#b9a6ff", bored: "#8f8a9e", sad: "#7f9fd6", frustrated: "#ef8f72", angry: "#ff8a80", anxious: "#f3b562", confused: "#d6c27f", surprised: "#e3a6d8", amused: "#b8e07f" };
+const PSTATE = { good: "#7fd6a4", fair: "#f3b562", poor: "#ef8f72", unknown: "#8a877f" };
+const WORDS = ["none", "slight", "moderate", "high", "extreme"];
+const MOODW = ["very low", "low", "neutral", "good", "great"];
+const RINGS = [["stress", "Stress"], ["tension", "Tension"], ["fatigue", "Fatigue"], ["focus", "Focus"], ["positivity", "Mood"]];
+const MEASURED = [["brow_furrow", "Brow furrow"], ["eye_squint", "Eye squint"], ["lip_press", "Lip press"], ["jaw_forward", "Jaw forward"], ["tension", "Facial tension"], ["eye_openness", "Eye openness"], ["smile", "Smile"], ["genuine_smile", "Genuine smile"], ["movement", "Head movement"], ["frown", "Mouth frown"]];
+const FLAGS = [["frowning", "Frowning", 1], ["jaw_clenched", "Jaw clenched", 1], ["eyes_on_screen", "Eyes on screen", 0], ["eyes_heavy", "Heavy eyes", 1], ["distracted", "Distracted", 1], ["smiling", "Smiling", 0], ["hand_on_face", "Hand on face", 1], ["talking", "Talking", 0], ["yawning", "Yawning", 1]];
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const pct = v => Math.round(v * 100) + "%";
+const hhmm = ts => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+let status = null, face = null, liveSeries = [], view = "day", dayData = null, summary = null, lastVerdictAt = 0, cadence = 2500;
+
+/* ---------- number tweening ---------- */
+const tweens = new Map();
+function tween(el, to, fmt = v => Math.round(v), dur = 900) {
+  if (typeof el === "string") el = $(el);
+  if (to == null || Number.isNaN(to)) { el.textContent = "–"; el._v = null; return; }
+  const from = el._v ?? to;
+  el._v = to;
+  if (reduced || from === to) { el.textContent = fmt(to); return; }
+  const t0 = performance.now();
+  tweens.set(el, { from, to, fmt, t0, dur });
+}
+(function loop(now) {
+  for (const [el, t] of tweens) {
+    const k = clamp((now - t.t0) / t.dur, 0, 1), e = 1 - Math.pow(1 - k, 4);
+    el.textContent = t.fmt(t.from + (t.to - t.from) * e);
+    if (k >= 1) tweens.delete(el);
+  }
+  requestAnimationFrame(loop);
+})(performance.now());
+
+function setFill(el, w, color) {
+  const prev = el._w;
+  el.style.width = w + "%";
+  if (color) el.style.background = color;
+  if (prev != null && Math.abs(prev - w) > 6) { el.classList.remove("shine"); void el.offsetWidth; el.classList.add("shine"); }
+  el._w = w;
+}
+
+/* ---------- scaffolding ---------- */
+$("measured").innerHTML = MEASURED.map(([k, l]) => `<div class="mrow"><div class="top"><span>${l}</span><span class="z mono" id="z_${k}"></span></div><div class="track"><div class="fill" id="m_${k}" style="width:0;background:#a39f97"></div><div class="tick" id="u_${k}" hidden></div></div></div>`).join("");
+$("scores").innerHTML = RINGS.map(([k, l]) => `<div class="srow"><span class="name"><span class="dot" style="background:${C[k]}"></span>${l}</span><div class="track"><div class="fill" id="s_${k}" style="width:0;background:${C[k]}"></div></div><span class="word" id="w_${k}">–</span></div>`).join("");
+$("flags").innerHTML = FLAGS.map(([k, l]) => `<span class="chip" id="f_${k}">${l} <span class="mono">–</span></span>`).join("");
+$("wave").innerHTML = Array.from({ length: 64 }, () => "<span></span>").join("");
+(function ring() {
+  let h = `<defs><linearGradient id="sheen" x1="0" x2="1"><stop offset="0" stop-color="rgba(255,255,255,0)"/><stop offset=".5" stop-color="rgba(255,255,255,.10)"/><stop offset="1" stop-color="rgba(255,255,255,0)"/></linearGradient></defs>`;
+  h += `<circle class="sheen" cx="150" cy="150" r="146" fill="none" stroke="url(#sheen)" stroke-width="1"/>`;
+  h += `<circle class="ripple" id="ripple" cx="150" cy="150" r="140" fill="none" stroke="rgba(143,184,255,.6)" stroke-width="1.5"/>`;
+  RINGS.forEach(([k], i) => {
+    const r = 136 - i * 17, c = 2 * Math.PI * r, arc = c * .75;
+    h += `<circle cx="150" cy="150" r="${r}" fill="none" stroke="rgba(255,255,255,.055)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${arc} ${c}" transform="rotate(135 150 150)"/>`;
+    h += `<circle class="arc" id="a_${k}" data-arc="${arc}" data-c="${c}" cx="150" cy="150" r="${r}" fill="none" stroke="${C[k]}" stroke-width="9" stroke-linecap="round" stroke-dasharray="0 ${c}" transform="rotate(135 150 150)"/>`;
+    h += `<g class="tip" id="t_${k}" style="transform:rotate(135deg);color:${C[k]}"><circle cx="${150 + r}" cy="150" r="2.6" fill="#fff"/></g>`;
+  });
+  $("ring").innerHTML = h;
+})();
+
+/* ---------- mood word: letter morph ---------- */
+let moodWord = "";
+function setMood(word) {
+  if (word === moodWord) return;
+  moodWord = word;
+  const el = $("mood"), old = [...el.children];
+  old.forEach((s, i) => { s.style.animationDelay = (i * 18) + "ms"; s.classList.add("out"); });
+  setTimeout(() => {
+    word = word.charAt(0).toUpperCase() + word.slice(1);
+    el.innerHTML = [...word].map((ch, i) => `<span style="animation-delay:${i * 38}ms">${ch === " " ? "&nbsp;" : esc(ch)}</span>`).join("");
+  }, old.length ? 300 : 0);
+}
+setMood("waking");
+
+/* ---------- face verdict ---------- */
+function sentence(f) {
+  const z = status?.lastZ || {}, parts = [], s = [];
+  if (f.frowning > .5 || (z.brow_furrow ?? 0) > 1.2) parts.push("brow furrowed");
+  if (f.jaw_clenched > .5 || (z.lip_press ?? 0) > 1.2) parts.push("lips pressed");
+  if (f.eyes_heavy > .5) parts.push("eyes heavy");
+  if (f.smiling > .5) parts.push(f.smiling > .8 ? "smiling broadly" : "smiling");
+  if (parts.length) s.push(parts[0][0].toUpperCase() + parts.join(", ").slice(1) + ".");
+  const doing = f.activity?.choice?.replaceAll("_", " ");
+  if (doing) s.push(`Looks like you're ${doing === "idle" ? "taking a pause" : doing}.`);
+  s.push(f.stress < 1.5 ? "Stress is low." : f.stress < 2.5 ? "Some stress showing." : "Stress is high.");
+  if (f.fatigue >= 2) s.push("Looking tired.");
+  return s.join(" ");
+}
+
+function auraFor(f) {
+  const warm = clamp((f.stress + f.tension) / 5, 0, 1), cool = clamp(f.focus / 4, 0, 1), calm = clamp(f.positivity / 4, 0, 1);
+  return `radial-gradient(closest-side, rgba(243,181,98,${(.04 + warm * .17).toFixed(3)}), rgba(143,184,255,${(.03 + cool * .10).toFixed(3)}) 52%, rgba(127,214,164,${(calm * .04).toFixed(3)}) 68%, transparent 76%)`;
+}
+
+function renderFace(f) {
+  face = f;
+  const gap = lastVerdictAt ? (performance.now() - lastVerdictAt) : 2500;
+  cadence = clamp(cadence * .7 + gap * .3, 800, 6000);
+  lastVerdictAt = performance.now();
+  // Ripple when the read changes or every few seconds, not on every 1 s verdict.
+  if (f.expression.choice !== moodWord.toLowerCase() || performance.now() - (renderFace.lastRipple || 0) > 6000) {
+    const rp = $("ripple"); rp.classList.remove("go"); void rp.getBoundingClientRect(); rp.classList.add("go");
+    renderFace.lastRipple = performance.now();
+  }
+
+  const e = f.expression, probs = Object.entries(e.probabilities).sort((a, b) => b[1] - a[1]);
+  setMood(e.choice);
+  $("conf").innerHTML = `<span class="mono" style="color:var(--text)" id="confN"></span>confident<span class="sep"></span>then ${probs[1][0]} <span class="mono">${pct(probs[1][1])}</span>`;
+  tween("confN", e.confidence * 100, v => Math.round(v) + "%", 700);
+  const sNew = sentence(f);
+  if ($("sentence").textContent !== sNew) { $("sentence").style.opacity = 0; setTimeout(() => { $("sentence").textContent = sNew; $("sentence").style.opacity = 1; }, 300); }
+  $("aura").style.background = auraFor(f);
+  tween("ringVal", f.stress, v => v.toFixed(1));
+  for (const [k] of RINGS) {
+    const a = $("a_" + k), arc = +a.dataset.arc, c = +a.dataset.c, v = clamp(f[k], 0, 4);
+    a.setAttribute("stroke-dasharray", `${(arc * v / 4).toFixed(1)} ${c.toFixed(1)}`);
+    $("t_" + k).style.transform = `rotate(${135 + 270 * v / 4}deg)`;
+    setFill($("s_" + k), v / 4 * 100);
+    $("w_" + k).textContent = k === "positivity" ? MOODW[Math.round(v)] : WORDS[Math.round(v)];
+  }
+  renderExpr(probs.slice(0, 5));
+  for (const [k, , hot] of FLAGS) {
+    const el = $("f_" + k), p = f[k] ?? 0, cls = p > .5 ? (hot ? "hot" : "on") : "";
+    const was = el.dataset.cls || "";
+    el.className = "chip " + cls;
+    if (cls && cls !== was) { el.classList.add("pop"); setTimeout(() => el.classList.remove("pop"), 500); }
+    el.dataset.cls = cls;
+    el.lastElementChild.textContent = pct(p);
+  }
+  liveSeries.push({ t: f.ts, stress: f.stress, focus: f.focus, fatigue: f.fatigue, positivity: f.positivity, posture: status?.postureScore != null ? status.postureScore / 25 : null, expression: e.choice });
+  liveSeries = liveSeries.filter(p => p.t > Date.now() / 1000 - 600);
+  if (view === "live") drawPlot(false);
+}
+
+/* expression rows reorder with FLIP */
+const exprRows = new Map();
+function renderExpr(top) {
+  const box = $("expr"), first = new Map();
+  for (const [k, row] of exprRows) first.set(k, row.getBoundingClientRect().top);
+  const keep = new Set(top.map(t => t[0]));
+  for (const [k, row] of exprRows) if (!keep.has(k)) { row.remove(); exprRows.delete(k); }
+  for (const [k, p] of top) {
+    let row = exprRows.get(k);
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "erow";
+      row.innerHTML = `<span>${k}</span><div class="track"><div class="fill" style="width:0;background:${EXPR[k] || "#888"}"></div></div><span class="mono"></span>`;
+      row.style.animation = "rise .5s var(--ease)";
+      exprRows.set(k, row);
+    }
+    box.appendChild(row);
+    setFill(row.querySelector(".fill"), p * 100);
+    tween(row.lastElementChild, p * 100, v => Math.round(v) + "%", 700);
+  }
+  for (const [k, row] of exprRows) {
+    if (!first.has(k)) continue;
+    const dy = first.get(k) - row.getBoundingClientRect().top;
+    if (dy) { row.style.transition = "none"; row.style.transform = `translateY(${dy}px)`; requestAnimationFrame(() => { row.style.transition = ""; row.style.transform = ""; }); }
+  }
+}
+
+function renderOverall(o) {
+  const tense = o.stress >= 2 ? "tense" : o.stress >= 1.3 ? "a little tense" : "relaxed";
+  const focus = o.focus >= 2.5 ? "focused" : o.focus >= 1.5 ? "partly focused" : "unfocused";
+  const w = $("ovWord");
+  if (w.textContent !== o.mood.choice) { w.style.opacity = 0; setTimeout(() => { w.textContent = o.mood.choice; w.style.opacity = 1; }, 300); }
+  $("ovSub").textContent = `${focus}, ${tense} · ${hhmm(o.ts)}`;
+  const chip = (k, l, good) => `<span class="chip ${o[k] > .5 ? (good ? "on pop" : "hot pop") : ""}">${l} <span class="mono">${pct(o[k])}</span></span>`;
+  $("ovChips").innerHTML = chip("needs_break", "Needs a break") + chip("in_flow", "In flow", 1) + chip("overwhelmed", "Overwhelmed");
+}
+
+/* ---------- voice ---------- */
+function renderSpeech(s, animate = true) {
+  const box = $("utters");
+  if (box.querySelector(".empty")) box.innerHTML = "";
+  const v = s.verdict, d = document.createElement("div");
+  d.className = "utter";
+  d.innerHTML = `<div class="t"></div><div class="meta"><span class="mono">${hhmm(s.ts)}</span>${v ? `<span class="chip on">${v.tone.choice}</span>` : ""}<span class="mono">${Math.round(s.prosody.words_per_minute)} wpm</span><span class="mono">${Math.round(s.prosody.pitch_hz)} Hz</span>${v ? `<span>stress ${WORDS[Math.round(v.stress)]}</span>` : ""}</div>`;
+  box.prepend(d);
+  while (box.children.length > 4) box.lastElementChild.remove();
+  const t = d.firstElementChild;
+  if (!s.text) { t.innerHTML = '<span style="color:var(--faint)">Transcript not kept</span>'; return; }
+  const full = "“" + s.text + "”";
+  if (!animate || reduced) { t.textContent = full; return; }
+  let i = 0;
+  const step = () => { i = Math.min(full.length, i + 2); t.innerHTML = esc(full.slice(0, i)) + (i < full.length ? '<span class="caret"></span>' : ""); if (i < full.length) setTimeout(step, 16); };
+  step();
+}
+
+/* ---------- posture figure ---------- */
+const fig = { cur: null, target: null, ghost: null };
+function figurePoints(p) {
+  const k = p.skeleton;
+  if (!k || !k.l_sh || !k.r_sh) return null;
+  const mx = (k.l_sh[0] + k.r_sh[0]) / 2, my = (k.l_sh[1] + k.r_sh[1]) / 2;
+  const sw = Math.hypot(k.l_sh[0] - k.r_sh[0], k.l_sh[1] - k.r_sh[1]) || .3;
+  const s = 96 / sw, out = {};
+  for (const [n, [x, y, vis]] of Object.entries(k)) out[n] = [-(x - mx) * s, (y - my) * s, vis];  // mirrored like the video
+  return out;
+}
+function drawFigure() {
+  const svg = $("figure"), cur = fig.cur;
+  if (!cur) { svg.innerHTML = `<text x="0" y="-40" text-anchor="middle" fill="#6f6c66" font-size="11" font-family="Geist">No shoulders in view</text>`; return; }
+  const P = n => cur[n], vis = n => cur[n] && cur[n][2] > .45;
+  const col = PSTATE[status?.posture?.state || "unknown"];
+  const head = ["nose", "l_ear", "r_ear"].filter(vis).map(P);
+  const hx = head.reduce((a, b) => a + b[0], 0) / (head.length || 1), hy = head.reduce((a, b) => a + b[1], 0) / (head.length || 1);
+  const earW = vis("l_ear") && vis("r_ear") ? Math.abs(P("l_ear")[0] - P("r_ear")[0]) : 40;
+  const hr = clamp(earW * .62, 18, 34);
+  const ls = P("l_sh"), rs = P("r_sh");
+  let h = `<defs>
+    <linearGradient id="torsoG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".30"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient>
+    <radialGradient id="headG" cx=".4" cy=".35" r=".75"><stop offset="0" stop-color="${col}" stop-opacity=".35"/><stop offset="1" stop-color="${col}" stop-opacity=".04"/></radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter></defs>`;
+  if (fig.ghost != null) {
+    const gy = -fig.ghost;
+    h += `<path class="ghost" d="M ${ls[0]} ${ls[1]} Q 0 ${gy + hr * 1.9} ${rs[0]} ${rs[1]}" /><circle class="ghost" cx="0" cy="${gy}" r="${hr}"/>`;
+    h += `<text x="0" y="${gy - hr - 7}" text-anchor="middle" fill="rgba(233,230,223,.35)" font-size="9" font-family="Geist" letter-spacing="1.5">UPRIGHT</text>`;
+  }
+  // torso: shoulders flowing down into a soft fading body
+  const bw = Math.abs(ls[0] - rs[0]);
+  h += `<path d="M ${ls[0]} ${ls[1]} C ${ls[0]} ${ls[1] + 30}, ${ls[0] * .82} ${ls[1] + 60}, ${ls[0] * .78} 60 L ${rs[0] * .78} 60 C ${rs[0] * .82} ${rs[1] + 60}, ${rs[0]} ${rs[1] + 30}, ${rs[0]} ${rs[1]} Q 0 ${Math.min(ls[1], rs[1]) - bw * .06} ${ls[0]} ${ls[1]} Z" fill="url(#torsoG)" stroke="none"/>`;
+  const limb = (a, b, w, o) => (vis(a) && vis(b)) ? `<line class="bone" x1="${P(a)[0]}" y1="${P(a)[1]}" x2="${P(b)[0]}" y2="${P(b)[1]}" stroke="${col}" stroke-width="${w}" opacity="${o}"/>` : "";
+  h += limb("l_sh", "l_el", 2.5, .55) + limb("r_sh", "r_el", 2.5, .55) + limb("l_el", "l_wr", 2, .35) + limb("r_el", "r_wr", 2, .35);
+  h += `<path class="bone" d="M ${ls[0]} ${ls[1]} Q 0 ${Math.min(ls[1], rs[1]) - bw * .06} ${rs[0]} ${rs[1]}" fill="none" stroke="${col}" stroke-width="3.5"/>`;
+  if (head.length) {
+    const nb = hy + hr * .92;
+    h += `<path class="bone" d="M ${-hr * .32} 2 L ${hx - hr * .3} ${nb} M ${hr * .32} 2 L ${hx + hr * .3} ${nb}" stroke="${col}" stroke-width="2" opacity=".7" fill="none"/>`;
+    h += `<circle cx="${hx}" cy="${hy}" r="${hr + 4}" fill="${col}" opacity=".18" filter="url(#glow)"/>`;
+    h += `<circle cx="${hx}" cy="${hy}" r="${hr}" fill="url(#headG)" stroke="${col}" stroke-width="2.2" class="bone"/>`;
+    if (vis("nose")) { const n = P("nose"); h += `<circle cx="${n[0]}" cy="${n[1]}" r="2" fill="${col}"/><line x1="${hx}" y1="${hy}" x2="${n[0]}" y2="${n[1]}" stroke="${col}" stroke-width="1" opacity=".5"/>`; }
+  }
+  for (const n of ["l_sh", "r_sh", "l_el", "r_el"]) if (vis(n)) h += `<circle cx="${P(n)[0]}" cy="${P(n)[1]}" r="${n.endsWith("sh") ? 4.5 : 3}" fill="#0f0f11" stroke="${col}" stroke-width="2" class="bone"/>`;
+  svg.innerHTML = h;
+}
+(function figLoop() {
+  if (fig.target) {
+    if (!fig.cur) fig.cur = JSON.parse(JSON.stringify(fig.target));
+    for (const n in fig.target) {
+      const t = fig.target[n], c = fig.cur[n] || (fig.cur[n] = [...t]);
+      c[0] += (t[0] - c[0]) * .18; c[1] += (t[1] - c[1]) * .18; c[2] = t[2];
+    }
+  } else fig.cur = null;
+  drawFigure();
+  setTimeout(() => requestAnimationFrame(figLoop), 33);
+})();
+
+function renderPosture(p, faceMetrics) {
+  const card = $("postureCard");
+  fig.target = p.visible ? figurePoints(p) : null;
+  fig.ghost = p.visible && p.ref_neck ? p.ref_neck * 96 : null;
+  const scored = p.visible && p.state !== "unknown";
+  tween("pScore", scored ? p.score : null, v => Math.round(v), 700);
+  $("pState").textContent = !p.visible ? "not in view" : scored ? p.state : "learning";
+  $("pState").style.color = PSTATE[p.state] || "var(--muted)";
+  const iss = scored ? (p.issues.length ? p.issues : ["Sitting well"]) : [];
+  const issKey = iss.join("|");
+  if ($("pIssues").dataset.k !== issKey) { $("pIssues").innerHTML = iss.map(t => `<div>${esc(t)}</div>`).join(""); $("pIssues").dataset.k = issKey; }
+  card.classList.toggle("alert", scored && p.state === "poor");
+  $("pRef").textContent = { calibrated: "vs your calibrated posture", learned: "vs your best posture this hour", learning: "learning your upright posture" }[p.reference] || "";
+  tween("pNeck", scored && p.ref_neck ? clamp(p.neck / p.ref_neck * 100, 0, 150) : null);
+  tween("pTilt", p.visible ? Math.abs(p.shoulder_tilt) : null, v => v.toFixed(1));
+  tween("pLean", scored ? (p.lean - 1) * 100 : null, v => (v > 0 ? "+" : "") + Math.round(v));
+}
+
+/* ---------- live tick ---------- */
+function renderLive(m) {
+  status = { ...m.status, lastZ: m.face.vs_usual, posture: m.posture, postureScore: m.posture?.state !== "unknown" ? m.posture?.score : null };
+  const st = m.status, f = m.face;
+  const set = (id, text, cls = "") => { const el = $(id); el.textContent = text; el.className = (el.classList.contains("mono") ? "mono " : "") + cls; };
+  set("sCam", st.camera === "on" ? `${Math.round(f.fps)} fps` : st.camera, st.camera_error ? "bad" : st.camera === "on" ? "" : "warn");
+  set("sClef", st.judge === "ready" ? (st.latency_ms.face ? (st.latency_ms.face / 1000).toFixed(1) + " s" : "ready") : st.judge, st.judge === "failed" ? "bad" : st.judge === "ready" ? "" : "warn");
+  $("sClef").title = st.judge_error || "";
+  set("sMic", st.voice === "paused" ? "off" : (st.mic || "–").replace(/^Razer /, ""), st.voice_error && !st.voice_error.startsWith("voice emotion") ? "warn" : "");
+  $("sMic").title = st.voice_error || "";
+  set("sBase", st.calibrating_seconds_left ? `calibrating · ${st.calibrating_seconds_left}s` : st.baseline_samples >= 60 ? "personal" : `learning · ${Math.min(99, Math.round(st.baseline_samples / 60 * 100))}%`, st.baseline_samples >= 60 && !st.calibrating_seconds_left ? "" : "warn");
+  $("app").classList.toggle("paused", st.paused);
+  $("live").classList.toggle("paused", st.paused);
+  $("liveText").textContent = st.paused ? "Paused · camera and mic off" : "Live · on device";
+  $("pauseText").textContent = st.paused ? "Resume" : "Pause";
+  $("pauseIcon").innerHTML = st.paused ? '<path d="M7 5l12 7-12 7z"/>' : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+  $("bMic").classList.toggle("off", !st.settings.mic); $("bMic").setAttribute("aria-pressed", st.settings.mic);
+  $("bMic").classList.toggle("live-mic", st.settings.mic && m.voice.speaking);
+  $("bNudge").classList.toggle("off", !st.settings.notifications); $("bNudge").setAttribute("aria-pressed", st.settings.notifications);
+  const camOk = !st.paused && st.camera === "on";
+  $("veil").hidden = camOk && $("video").classList.contains("ready");
+  $("veilText").textContent = st.paused ? "Paused" : st.camera_error || "Starting camera";
+
+  // calibration overlay
+  const left = st.calibrating_seconds_left;
+  $("calib").classList.toggle("on", left > 0);
+  if (left > 0) { $("calibN").textContent = left; $("calibArc").setAttribute("stroke-dashoffset", (326.7 * (1 - left / 30)).toFixed(1)); }
+
+  $("mirror").classList.toggle("tracking", f.present && camOk);
+  const track = f.present ? "on" : "";
+  if ($("tTrack").dataset.s !== track) {
+    $("tTrack").innerHTML = f.present ? '<span class="dot" style="background:var(--mint);box-shadow:0 0 8px var(--mint)"></span>Tracking' : '<span class="dot" style="background:var(--faint)"></span>No face';
+    $("tTrack").className = "chip pop"; $("tTrack").dataset.s = track;
+  }
+  $("tGaze").hidden = !f.present;
+  $("tGaze").textContent = f.yawning ? "Yawning" : f.looking_at_screen ? "Eyes on screen" : "Looking away";
+  const mt = f.metrics || {};
+  tween("vBlink", f.present ? f.blink_rate : null);
+  $("vHead").innerHTML = f.present ? `${Math.round(mt.yaw)}°<span class="u">${Math.round(mt.pitch)}°</span>` : "–";
+  tween("vDesk", m.minutes_since_break || null);
+  tween("vDist", f.present && mt.face_size ? 15 / (1.74 * mt.face_size) : null);
+
+  const base = st.baseline || {}, z = f.vs_usual || {};
+  for (const [k] of MEASURED) {
+    const v = f.present ? (mt[k] ?? 0) : 0, zz = z[k], strong = zz != null && Math.abs(zz) >= 1;
+    const el = $("m_" + k);
+    el.style.width = Math.min(100, v * 100) + "%";
+    el.style.background = strong ? (zz > 0 ? "var(--amber)" : "var(--ice)") : "#a39f97";
+    const zEl = $("z_" + k);
+    zEl.textContent = strong ? `${zz > 0 ? "▲" : "▼"} ${Math.abs(zz).toFixed(1)}σ` : (f.present ? v.toFixed(2) : "");
+    zEl.style.color = strong ? (zz > 0 ? "var(--amber)" : "var(--ice)") : "var(--faint)";
+    const u = $("u_" + k);
+    if (base[k]) { u.hidden = false; u.style.left = Math.min(100, base[k].mean * 100) + "%"; } else u.hidden = true;
+  }
+  $("mNote").textContent = st.baseline_samples ? "tick = your usual" : "learning your usual face";
+
+  if (m.posture) renderPosture(m.posture, mt);
+
+  const bars = $("wave").children, lvl = clamp((m.voice.level_db + 62) / 42, 0, 1);
+  for (let i = 0; i < bars.length - 1; i++) { bars[i].style.height = bars[i + 1].style.height; bars[i].style.background = bars[i + 1].style.background; }
+  bars[bars.length - 1].style.height = (3 + lvl * 19).toFixed(1) + "px";
+  bars[bars.length - 1].style.background = m.voice.speaking ? "rgba(243,181,98,.9)" : `rgba(233,230,223,${(.16 + lvl * .3).toFixed(2)})`;
+  $("voiceCard").classList.toggle("speaking", m.voice.speaking);
+  $("vState").innerHTML = st.voice === "paused" ? '<span class="dot" style="background:var(--faint)"></span>Mic off'
+    : m.voice.speaking ? '<span class="dot" style="background:var(--amber);box-shadow:0 0 8px var(--amber)"></span><span style="color:var(--amber)">Hearing speech</span>'
+    : '<span class="dot" style="background:var(--mint)"></span>Listening';
+}
+
+/* heartbeat: header ring fills toward the next Clef verdict */
+(function beat() {
+  const el = $("beat");
+  if (lastVerdictAt && status?.judge === "ready" && !status?.paused) {
+    const k = clamp((performance.now() - lastVerdictAt) / cadence, 0, 1);
+    el.setAttribute("stroke-dashoffset", (37.7 * (1 - k)).toFixed(2));
+  }
+  setTimeout(() => requestAnimationFrame(beat), 50);
+})();
+
+/* ---------- day chart ---------- */
+let plotX = null, plotPts = [];
+function linePath(points, key, x) {
+  let d = "", last = null;
+  for (const p of points) {
+    if (p[key] == null) { last = null; continue; }
+    const X = x(p.t).toFixed(1), Y = (120 - clamp(p[key], 0, 4) / 4 * 114 - 3).toFixed(1);
+    d += (last == null || p.t - last > 1200 ? "M" : "L") + X + "," + Y;
+    last = p.t;
+  }
+  return d;
+}
+
+function drawPlot(animate = true) {
+  const svg = $("plotSvg"), plot = $("plot");
+  plot.querySelectorAll(".label, .nowline").forEach(n => n.remove());
+  let pts, t0, t1;
+  if (view === "live") {
+    t1 = Date.now() / 1000; t0 = t1 - 600; pts = liveSeries;
+    $("dayTitle").textContent = "Last 10 minutes";
+  } else {
+    const d = dayData; if (!d) return;
+    pts = d.points;
+    const today = new Date(d.start * 1000).toDateString() === new Date().toDateString();
+    $("dayTitle").textContent = today ? "Today" : new Date(d.start * 1000).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+    t0 = d.start + 8 * 3600; t1 = d.start + 22 * 3600;
+    if (pts.length) { t0 = Math.min(t0, pts[0].t - 1800); t1 = Math.max(t1, pts[pts.length - 1].t + 1800); }
+    t1 = Math.min(t1, d.start + 86400); t0 = Math.max(t0, d.start);
+  }
+  const x = t => (t - t0) / (t1 - t0) * 1000;
+  plotX = { t0, t1 }; plotPts = pts;
+  let h = "";
+  for (const y of [31, 60, 89]) h += `<line x1="0" x2="1000" y1="${y}" y2="${y}" stroke="rgba(255,255,255,.05)" vector-effect="non-scaling-stroke"/>`;
+  if (view === "day") for (const b of (summary?.breaks || [])) h += `<rect x="${x(b.start)}" y="0" width="${Math.max(2, x(b.start + b.minutes * 60) - x(b.start))}" height="120" fill="rgba(255,255,255,.03)"/>`;
+  for (const [k, c, w] of [["posture", C.posture, 1.5], ["focus", C.focus, 2], ["fatigue", C.fatigue, 2], ["positivity", C.positivity, 2], ["stress", C.stress, 2.2]]) {
+    const d = linePath(pts, k, x);
+    if (!d) continue;
+    h += `<path class="line${k === "posture" ? " dotted" : ""}" d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="${k === "stress" ? 1 : .85}"/>`;
+  }
+  svg.innerHTML = h;
+  if (animate && !reduced) svg.querySelectorAll("path.line:not(.dotted)").forEach((p, i) => {
+    const len = p.getTotalLength() * 2 + 50; p.style.setProperty("--len", len); p.style.animationDelay = (i * 120) + "ms"; p.classList.add("draw");
+  });
+  const nowT = Date.now() / 1000;
+  if (nowT > t0 && nowT < t1) plot.insertAdjacentHTML("beforeend", `<div class="nowline" style="left:${x(nowT) / 10}%"></div>`);
+  if (!pts.length) plot.insertAdjacentHTML("beforeend", `<div class="label empty" style="left:50%;top:42%;transform:translateX(-50%)">${view === "live" ? "Building the last ten minutes…" : "No readings for this day."}</div>`);
+  if (view === "day") (summary?.stress_peaks || []).slice(0, 3).forEach((p, i) => {
+    plot.insertAdjacentHTML("beforeend", `<div class="label mono" style="left:${x(p.ts) / 10}%;top:${Math.max(0, 100 - p.stress / 4 * 100 - 16)}%;color:var(--amber);transform:translateX(-50%);animation-delay:${1.2 + i * .15}s">● peak ${hhmm(p.ts)}</div>`);
+  });
+  const n = 64, size = (t1 - t0) / n, strip = [];
+  for (let i = 0; i < n; i++) {
+    const a = t0 + i * size, b = a + size;
+    const inside = pts.filter(p => p.t >= a - (view === "day" ? (dayData?.bucket_minutes || 5) * 30 : 0) && p.t < b && p.expression);
+    strip.push(`<span style="background:${inside.length ? (EXPR[inside[inside.length - 1].expression] || "#555") : "rgba(255,255,255,.04)"}"></span>`);
+  }
+  $("strip").innerHTML = strip.join("");
+  const marks = [];
+  if (view === "live") for (let m = 10; m >= 0; m -= 2) marks.push(m ? `−${m}m` : "now");
+  else { const step = (t1 - t0) > 12 * 3600 ? 7200 : 3600; for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) marks.push(hhmm(t)); }
+  $("hours").innerHTML = marks.map(m => `<span>${m}</span>`).join("");
+}
+
+$("plot").addEventListener("mousemove", ev => {
+  if (!plotX) return;
+  const r = $("plot").getBoundingClientRect(), fx = (ev.clientX - r.left) / r.width;
+  const t = plotX.t0 + fx * (plotX.t1 - plotX.t0);
+  $("cross").style.left = (fx * 100) + "%";
+  let best = null, bd = Infinity;
+  for (const p of plotPts) { const d = Math.abs(p.t - t); if (d < bd) { bd = d; best = p; } }
+  const tip = $("tip");
+  if (!best || bd > (view === "live" ? 60 : 900)) { tip.classList.remove("has"); return; }
+  const row = (k, l, f = v => v.toFixed(1) + " / 4") => best[k] != null ? `<div class="r"><span><span class="dot" style="background:${C[k]};margin-right:6px"></span>${l}</span><b class="mono">${f(best[k])}</b></div>` : "";
+  tip.innerHTML = `<div class="mono" style="color:var(--text);margin-bottom:5px">${hhmm(best.t)}${best.expression ? ` · <span style="color:${EXPR[best.expression]}">${best.expression}</span>` : ""}</div>` +
+    row("stress", "Stress") + row("focus", "Focus") + row("fatigue", "Fatigue") + row("positivity", "Mood") + row("posture", "Posture", v => Math.round(v * 25));
+  tip.classList.add("has");
+  tip.style.left = Math.min(r.width - 170, Math.max(0, ev.clientX - r.left + 14)) + "px";
+});
+
+function renderStats(s) {
+  const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, "0")}` : `${Math.round(m)}`;
+  const top = Object.entries(s.expressions || {})[0];
+  const longest = (s.focus_streaks || [])[0];
+  const items = [
+    ["At desk", fmtMin(s.minutes_present || 0), (s.minutes_present || 0) >= 60 ? "" : "min"],
+    ["Longest focus", longest ? fmtMin(longest.minutes) : "–", longest && longest.minutes < 60 ? "min" : ""],
+    ["Posture", s.avg_posture != null ? Math.round(s.avg_posture) : "–", s.minutes_poor_posture ? `${Math.round(s.minutes_poor_posture)} min slouched` : ""],
+    ["Talking", fmtMin(s.minutes_talking || 0), "min"],
+    ["Breaks", (s.breaks || []).length, (s.breaks || []).length ? "last " + hhmm(s.breaks.slice(-1)[0].start) : ""],
+    ["Mostly", top ? top[0][0].toUpperCase() + top[0].slice(1) : "–", top ? pct(top[1]) : ""],
+  ];
+  const html = items.map(([l, v, s2], i) => `<div><div class="lab sm">${l}</div><div class="v"><span class="${typeof v === "number" || /^\d/.test(v) ? "mono" : ""}" id="st${i}">${v}</span><span class="s">${s2}</span></div></div>`).join("");
+  if ($("stats").dataset.h !== html) { $("stats").innerHTML = html; $("stats").dataset.h = html; }
+  tween("pGood", s.avg_posture != null && s.minutes_present ? (s.minutes_good_posture || 0) / Math.max(1, s.minutes_present) * 100 : null);
+}
+
+async function loadDay(animate = true) {
+  const date = $("day").value;
+  const [tl, sm] = await Promise.all([fetch(`/api/timeline?date=${date}`).then(r => r.json()), fetch(`/api/summary?date=${date}`).then(r => r.json())]);
+  dayData = tl; summary = sm;
+  renderStats(sm);
+  if (view === "day") drawPlot(animate);
+}
+
+/* ---------- wiring ---------- */
+let toastTimer;
+function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 7000); }
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { $("video").src = "/video.mjpg?" + Date.now(); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "live") renderLive(m);
+    else if (m.type === "hello") { if (m.latest.face) renderFace(m.latest.face); if (m.latest.overall) renderOverall(m.latest.overall); }
+    else if (m.type === "verdict" && m.kind === "face") renderFace(m.data);
+    else if (m.type === "verdict" && m.kind === "overall") renderOverall(m.data);
+    else if (m.type === "speech") renderSpeech(m.data);
+    else if (m.type === "notification") toast(m.data.text);
+    else if (m.type === "calibrated") toast("Calibrated. Your face and posture now compare against this.");
+  };
+  ws.onclose = () => setTimeout(connect, 1500);
+}
+
+async function post(url, body) { const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }); return r.json(); }
+$("video").onload = () => $("video").classList.add("ready");
+$("video").onerror = () => { $("video").classList.remove("ready"); setTimeout(() => { $("video").src = "/video.mjpg?" + Date.now(); }, 2000); };
+$("bPause").onclick = () => post(status?.paused ? "/api/resume" : "/api/pause");
+$("bCal").onclick = () => post("/api/calibrate?seconds=30");
+$("bMic").onclick = () => post("/api/settings", { mic: !status?.settings.mic });
+$("bNudge").onclick = () => post("/api/settings", { notifications: !status?.settings.notifications });
+const setView = v => { view = v; $("rDay").classList.toggle("sel", v === "day"); $("rLive").classList.toggle("sel", v === "live"); drawPlot(true); };
+const todayStr = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+$("rDay").onclick = () => { $("day").value = todayStr(); view = "day"; $("rDay").classList.add("sel"); $("rLive").classList.remove("sel"); loadDay(true); };
+$("rLive").onclick = () => setView("live");
+$("rPick").onclick = () => { try { $("day").showPicker(); } catch { $("day").focus(); } };
+$("day").onchange = () => { view = "day"; $("rDay").classList.add("sel"); $("rLive").classList.remove("sel"); loadDay(true); };
+$("day").value = todayStr();
+
+/* cursor spotlight on cards */
+document.addEventListener("mousemove", ev => {
+  for (const c of document.querySelectorAll(".card")) {
+    const r = c.getBoundingClientRect();
+    c.style.setProperty("--mx", (ev.clientX - r.left) + "px"); c.style.setProperty("--my", (ev.clientY - r.top) + "px");
+  }
+});
+
+const tickClock = () => {
+  const d = new Date();
+  $("clock").innerHTML = d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) + " · " +
+    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) + `<span class="sec">:${String(d.getSeconds()).padStart(2, "0")}</span>`;
+};
+tickClock(); setInterval(tickClock, 1000);
+
+(async () => {
+  const s = await fetch("/api/speech?minutes=240").then(r => r.json());
+  s.slice(-4).forEach(x => renderSpeech(x, false));
+  const tl = await fetch("/api/timeline?bucket=1").then(r => r.json());
+  liveSeries = tl.points.filter(p => p.t > Date.now() / 1000 - 600 && p.stress != null);
+})();
+setTimeout(() => loadDay(true), 700);
+setInterval(() => { if ($("day").value === todayStr() && view === "day") loadDay(false); }, 60000);
+setInterval(() => { if (view === "live") drawPlot(false); }, 5000);
+connect();
+</script>
+</body>
+</html>

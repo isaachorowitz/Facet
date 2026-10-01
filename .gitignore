@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+models/*.task
+*.db
+models/*.part
+.playwright-mcp/

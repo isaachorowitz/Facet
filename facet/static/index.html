@@ -650,7 +650,7 @@ function renderLive(m) {
   set("sCam", st.camera === "on" ? `${Math.round(f.fps)} fps` : st.camera, st.camera_error ? "bad" : st.camera === "on" ? "" : "warn");
   set("sClef", st.judge === "ready" ? (st.latency_ms.face ? (st.latency_ms.face / 1000).toFixed(1) + " s" : "ready") : st.judge, st.judge === "failed" ? "bad" : st.judge === "ready" ? "" : "warn");
   $("sClef").title = st.judge_error || "";
-  set("sMic", st.voice === "paused" ? "off" : (st.mic || "–").replace(/^Razer /, ""), st.voice_error && !st.voice_error.startsWith("voice emotion") ? "warn" : "");
+  set("sMic", st.voice === "paused" ? "off" : (st.mic || "–"), st.voice_error && !st.voice_error.startsWith("voice emotion") ? "warn" : "");
   $("sMic").title = st.voice_error || "";
   set("sBase", st.calibrating_seconds_left ? `calibrating · ${st.calibrating_seconds_left}s` : st.baseline_samples >= 60 ? "personal" : `learning · ${Math.min(99, Math.round(st.baseline_samples / 60 * 100))}%`, st.baseline_samples >= 60 && !st.calibrating_seconds_left ? "" : "warn");
   $("app").classList.toggle("paused", st.paused);

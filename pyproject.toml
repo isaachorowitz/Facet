@@ -1,7 +1,17 @@
 [project]
 name = "facet"
 version = "0.1.0"
-description = "Local webcam and voice mood monitor powered by Clef-flash"
+description = "A private, on-device mirror for your face, posture, hands and voice, powered by Clef-flash on Apple Silicon"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "Isaac Horowitz" }]
+keywords = ["mlx", "apple-silicon", "webcam", "posture", "mood", "mediapipe", "local-first"]
+classifiers = [
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "torch>=2.11",
@@ -26,6 +36,9 @@ dev = ["pytest>=8", "httpx2>=2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[project.urls]
+Repository = "https://github.com/isaachorowitz/Facet"
 
 [project.scripts]
 facet = "facet.app:main"

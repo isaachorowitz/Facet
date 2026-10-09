@@ -12,7 +12,7 @@
   },
   "voice": "listening",
   "voice_error": null,
-  "mic": "Razer Seiren",
+  "mic": "USB Microphone",
   "calibrating_seconds_left": 0,
   "baseline_samples": 85,
   "baseline": {

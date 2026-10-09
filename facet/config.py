@@ -35,8 +35,8 @@ PORT = int(os.environ.get("FACET_PORT", "8765"))
 CAMERA_INDEX = int(os.environ.get("FACET_CAMERA", "0"))
 CAMERA_WIDTH, CAMERA_HEIGHT = 1280, 720
 
-# Mic: first input device whose name contains one of these, else the system default.
-MIC_PREFERENCE = [s for s in os.environ.get("FACET_MIC", "Seiren,MX Brio").split(",") if s]
+# Mic: first input device whose name contains one of these (comma separated), else the system default.
+MIC_PREFERENCE = [s.strip() for s in os.environ.get("FACET_MIC", "").split(",") if s.strip()]
 
 CLEF_REPO = os.environ.get("FACET_CLEF", "Cloudflare/clef-flash")
 CLEF_DEVICE = os.environ.get("FACET_DEVICE", "mps")  # where the small head runs

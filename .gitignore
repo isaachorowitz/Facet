@@ -4,4 +4,3 @@ models/*.task
 *.db
 models/*.part
 .playwright-mcp/
-.codex-runs/

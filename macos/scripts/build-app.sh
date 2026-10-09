@@ -41,10 +41,12 @@ rm -rf "${APP:?}"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/backend" "$APP/Contents/Resources/bin"
 cp "$BIN/FacetApp" "$APP/Contents/MacOS/FacetApp"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# Forks signing with their own team can set FACET_BUNDLE_ID (camera and mic permissions follow the bundle ID).
+[[ -n "${FACET_BUNDLE_ID:-}" ]] && plutil -replace CFBundleIdentifier -string "$FACET_BUNDLE_ID" "$APP/Contents/Info.plist"
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 BACKEND="$APP/Contents/Resources/backend"
 rsync -a --exclude '__pycache__' --exclude '*.pyc' ../facet "$BACKEND/"
-cp ../pyproject.toml ../uv.lock ../README.md "$BACKEND/"
+cp ../pyproject.toml ../uv.lock ../README.md ../LICENSE ../THIRD_PARTY_NOTICES.md "$BACKEND/"
 if [[ -d ../web/dist ]]; then
   mkdir -p "$BACKEND/web"
   rsync -a ../web/dist "$BACKEND/web/"
@@ -66,7 +68,7 @@ KEYCHAIN=()
 sign() {
   codesign --force --options runtime "$TIMESTAMP" ${KEYCHAIN[@]+"${KEYCHAIN[@]}"} --sign "$IDENTITY" "$@"
 }
-# Inside out. This app has no embedded Swift frameworks requiring AgentReel's ad hoc exception.
+# Inside out: the bundled uv first, then the app. There are no embedded frameworks to sign separately.
 sign "$APP/Contents/Resources/bin/uv"
 sign --entitlements Resources/Facet.entitlements "$APP"
 codesign --verify --deep --strict "$APP"

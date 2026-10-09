@@ -35,7 +35,7 @@ export function Header({ status, live, timing, onError, focus, onFocus }: {
         <circle ref={beat} cx="8" cy="8" r="6" fill="none" stroke="#8fb8ff" strokeWidth="2" strokeDasharray="37.7" strokeDashoffset="37.7" transform="rotate(-90 8 8)" strokeLinecap="round" /></svg>
         Clef-flash <b title={status?.judge_error ?? ''} className={`mono ${status?.judge === 'failed' ? 'bad' : status?.judge !== 'ready' ? 'warn' : ''}`}>{clef}</b></span>
       <span>Mic <b title={status?.voice_error ?? ''} className={status?.voice_error && !status.voice_error.startsWith('voice emotion') ? 'warn' : ''}>
-        {status?.voice === 'paused' ? 'off' : (status?.mic || '–').replace(/^Razer /, '')}</b></span>
+        {status?.voice === 'paused' ? 'off' : (status?.mic || '–')}</b></span>
       <span>Baseline <b className={status && status.baseline_samples >= 60 && !status.calibrating_seconds_left ? '' : 'warn'}>{baseline}</b></span>
     </div><div className="grow" />
     <FocusControl session={focus} onSession={onFocus} onError={onError} />
